@@ -90,3 +90,40 @@ export type AlpacaOptionSnapshotsResponse = {
   snapshots: Record<string, AlpacaOptionSnapshot>;
   next_page_token?: string;
 };
+
+export type AlpacaOrderSide = "buy" | "sell";
+export type AlpacaPositionIntent =
+  | "buy_to_open"
+  | "buy_to_close"
+  | "sell_to_open"
+  | "sell_to_close";
+
+export type AlpacaMlegOrderLegRequest = {
+  position_intent: AlpacaPositionIntent;
+  ratio_qty: string;
+  side: AlpacaOrderSide;
+  symbol: string;
+};
+
+export type AlpacaMlegLimitOrderRequest = {
+  client_order_id?: string;
+  extended_hours: false;
+  legs: AlpacaMlegOrderLegRequest[];
+  limit_price: string;
+  order_class: "mleg";
+  qty: string;
+  time_in_force: "day";
+  type: "limit";
+};
+
+export type AlpacaOrder = {
+  id: string;
+  client_order_id?: string;
+  created_at?: string;
+  submitted_at?: string;
+  status: string;
+  order_class?: string;
+  qty?: string;
+  limit_price?: string;
+  legs?: AlpacaOrder[];
+};

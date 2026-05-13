@@ -6,6 +6,7 @@ import {
   defaultVerticalSpreadRiskProfile,
   type VerticalSpreadRiskProfile,
 } from "@/features/risk/types";
+import { getTodaysMlegOrderCount } from "@/features/orders/paper-mleg";
 import { generateVerticalSpreadCandidates } from "@/features/spreads/generator";
 import type {
   VerticalSpreadCandidatesErrorResponse,
@@ -127,6 +128,11 @@ export async function GET(
 
   try {
     const client = createAlpacaPaperClient();
+    const currentTradesToday = await getTodaysMlegOrderCount(client);
+    const effectiveRiskProfile = {
+      ...riskProfile,
+      currentTradesToday,
+    };
     const expirationDateGte = getIsoDateOffset(riskProfile.minDte);
     const expirationDateLte = getIsoDateOffset(riskProfile.maxDte);
     const [contractsResponse, snapshotsResponse] = await Promise.all([
@@ -146,7 +152,7 @@ export async function GET(
     const generation = generateVerticalSpreadCandidates({
       contracts: contractsResponse.option_contracts,
       limit,
-      riskProfile,
+      riskProfile: effectiveRiskProfile,
       snapshots: snapshotsResponse.snapshots,
     });
 
@@ -161,7 +167,7 @@ export async function GET(
       candidates: generation.candidates,
       fetchedAt: new Date().toISOString(),
       rejectedCount: generation.rejectedCount,
-      riskProfile,
+      riskProfile: effectiveRiskProfile,
       scannedSpreads: generation.scannedSpreads,
       underlyingSymbol: symbol,
     });

@@ -4,8 +4,10 @@ import { assertPaperTradingBaseUrl } from "@/lib/alpaca/constants";
 import type {
   AlpacaAccount,
   AlpacaClock,
+  AlpacaMlegLimitOrderRequest,
   AlpacaOptionContractsResponse,
   AlpacaOptionSnapshotsResponse,
+  AlpacaOrder,
   AlpacaPosition,
 } from "@/lib/alpaca/types";
 import { getServerEnv, type ServerEnv } from "@/lib/env/server";
@@ -27,6 +29,15 @@ type OptionSnapshotsParams = {
   expirationDateLte?: string;
   feed?: "opra" | "indicative";
   limit?: number;
+};
+
+type GetOrdersParams = {
+  after?: string;
+  direction?: "asc" | "desc";
+  limit?: number;
+  nested?: boolean;
+  status?: "open" | "closed" | "all";
+  until?: string;
 };
 
 export class AlpacaClientError extends Error {
@@ -77,6 +88,41 @@ export class AlpacaPaperClient {
 
   getPositions(options?: ReadonlyRequestOptions): Promise<AlpacaPosition[]> {
     return this.get("/v2/positions", options);
+  }
+
+  getOrders(
+    params: GetOrdersParams = {},
+    options?: ReadonlyRequestOptions,
+  ): Promise<AlpacaOrder[]> {
+    const searchParams = new URLSearchParams();
+
+    if (params.status) {
+      searchParams.set("status", params.status);
+    }
+
+    if (params.limit) {
+      searchParams.set("limit", String(params.limit));
+    }
+
+    if (params.after) {
+      searchParams.set("after", params.after);
+    }
+
+    if (params.until) {
+      searchParams.set("until", params.until);
+    }
+
+    if (params.direction) {
+      searchParams.set("direction", params.direction);
+    }
+
+    if (typeof params.nested === "boolean") {
+      searchParams.set("nested", String(params.nested));
+    }
+
+    const query = searchParams.size > 0 ? `?${searchParams}` : "";
+
+    return this.get(`/v2/orders${query}`, options);
   }
 
   getOptionContracts(
@@ -135,6 +181,13 @@ export class AlpacaPaperClient {
     );
   }
 
+  submitMlegLimitOrder(
+    order: AlpacaMlegLimitOrderRequest,
+    options?: ReadonlyRequestOptions,
+  ): Promise<AlpacaOrder> {
+    return this.post("/v2/orders", order, options);
+  }
+
   // Keep the public client read-only until risk checks, logging, and paper order
   // preview flows are implemented.
   private async get<T>(
@@ -164,6 +217,29 @@ export class AlpacaPaperClient {
       headers: this.headers,
       method: "GET",
       signal: options?.signal,
+    });
+
+    if (!response.ok) {
+      throw await AlpacaClientError.fromResponse(response);
+    }
+
+    return (await response.json()) as T;
+  }
+
+  private async post<T>(
+    path: `/${string}`,
+    body: unknown,
+    options?: ReadonlyRequestOptions,
+  ): Promise<T> {
+    const response = await fetch(`${this.tradingBaseUrl}${path}`, {
+      cache: "no-store",
+      headers: {
+        ...this.headers,
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+      signal: options?.signal,
+      body: JSON.stringify(body),
     });
 
     if (!response.ok) {

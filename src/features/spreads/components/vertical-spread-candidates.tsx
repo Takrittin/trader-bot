@@ -2,6 +2,15 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import type { KillSwitchStatus } from "@/features/kill-switch/types";
+import {
+  PAPER_ORDER_CONFIRMATION_PHRASE,
+  type PaperMlegOrderErrorResponse,
+  type PaperMlegOrderPreviewRequest,
+  type PaperMlegOrderPreviewResponse,
+  type PaperMlegOrderSubmitRequest,
+  type PaperMlegOrderSubmitResponse,
+} from "@/features/orders/types";
 import { normalizeUnderlyingSymbol } from "@/features/options/symbol";
 import {
   defaultVerticalSpreadRiskProfile,
@@ -23,6 +32,20 @@ type CandidateState =
   | { status: "error"; message: string }
   | { data: VerticalSpreadCandidatesResponse; status: "success" };
 
+type PaperOrderState =
+  | { status: "idle" }
+  | { candidateId: string; status: "loading" }
+  | { message: string; status: "error" }
+  | {
+      confirmation: string;
+      data: PaperMlegOrderPreviewResponse;
+      status: "ready";
+      submitted?: PaperMlegOrderSubmitResponse;
+      submitError?: string;
+      submitting: boolean;
+      submitMessage?: string;
+    };
+
 type CandidateFormState = VerticalSpreadRiskProfile & {
   limit: number;
   symbol: string;
@@ -43,7 +66,6 @@ const strategyLabels: Record<VerticalSpreadStrategy, string> = {
 
 function buildEndpoint(formState: CandidateFormState): string {
   const params = new URLSearchParams({
-    currentTradesToday: String(formState.currentTradesToday),
     limit: String(formState.limit),
     maxBidAskWidth: String(formState.maxBidAskWidth),
     maxDte: String(formState.maxDte),
@@ -85,6 +107,21 @@ async function fetchCandidates(
   });
 
   return parseCandidatesResponse(response);
+}
+
+async function parseJsonApiResponse<TResponse extends object>(
+  response: Response,
+  fallbackError: string,
+): Promise<TResponse> {
+  const body = (await response.json().catch(() => ({}))) as
+    | TResponse
+    | PaperMlegOrderErrorResponse;
+
+  if (!response.ok) {
+    throw new Error("error" in body ? body.error : fallbackError);
+  }
+
+  return body as TResponse;
 }
 
 function formatCurrency(value: number | null): string {
@@ -167,9 +204,20 @@ export function VerticalSpreadCandidates({
     symbol,
   });
   const [state, setState] = useState<CandidateState>({ status: "loading" });
+  const [quantity, setQuantity] = useState(1);
+  const [orderState, setOrderState] = useState<PaperOrderState>({
+    status: "idle",
+  });
+  const [killSwitch, setKillSwitch] = useState<KillSwitchStatus | null>(null);
+  const [killSwitchBusy, setKillSwitchBusy] = useState(false);
+  const [killSwitchError, setKillSwitchError] = useState<string | null>(null);
+  const [killSwitchMessage, setKillSwitchMessage] = useState<string | null>(
+    null,
+  );
 
   const loadCandidates = useCallback(async (nextFormState: CandidateFormState) => {
     setState({ status: "loading" });
+    setOrderState({ status: "idle" });
 
     try {
       const data = await fetchCandidates(nextFormState);
@@ -184,6 +232,39 @@ export function VerticalSpreadCandidates({
         status: "error",
       });
     }
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadKillSwitchStatus() {
+      try {
+        const response = await fetch("/api/kill-switch", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const data = await parseJsonApiResponse<KillSwitchStatus>(
+          response,
+          "Unable to load order submission status.",
+        );
+
+        setKillSwitch(data);
+      } catch (error) {
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        setKillSwitchError(
+          error instanceof Error
+            ? error.message
+            : "Unable to load order submission status.",
+        );
+      }
+    }
+
+    void loadKillSwitchStatus();
+
+    return () => controller.abort();
   }, []);
 
   useEffect(() => {
@@ -223,7 +304,7 @@ export function VerticalSpreadCandidates({
       `Max loss ${formatCurrency(profile.maxLoss)}`,
       `${profile.minDte}-${profile.maxDte} DTE`,
       `Bid/ask <= ${formatCurrency(profile.maxBidAskWidth)}`,
-      `Trades ${profile.currentTradesToday}/${profile.maxTradesPerDay}`,
+      `Paper trades ${profile.currentTradesToday}/${profile.maxTradesPerDay}`,
     ];
   }, [formState, state]);
 
@@ -235,6 +316,194 @@ export function VerticalSpreadCandidates({
       ...current,
       [field]: Number(value),
     }));
+  }
+
+  function buildPaperOrderRequest(
+    candidateId: string,
+    source: VerticalSpreadCandidatesResponse,
+  ): PaperMlegOrderPreviewRequest {
+    const riskProfile = source.riskProfile;
+
+    return {
+      candidateId,
+      limit: formState.limit,
+      quantity,
+      riskProfile: {
+        maxBidAskWidth: riskProfile.maxBidAskWidth,
+        maxDte: riskProfile.maxDte,
+        maxLoss: riskProfile.maxLoss,
+        maxTradesPerDay: riskProfile.maxTradesPerDay,
+        minDte: riskProfile.minDte,
+      },
+    };
+  }
+
+  function buildPaperSubmitRequest(
+    readyState: Extract<PaperOrderState, { status: "ready" }>,
+  ): PaperMlegOrderSubmitRequest {
+    const { preview } = readyState.data;
+
+    return {
+      candidateId: preview.candidate.id,
+      confirmation: readyState.confirmation,
+      limit: formState.limit,
+      quantity: preview.quantity,
+      riskProfile: {
+        maxBidAskWidth: preview.riskProfile.maxBidAskWidth,
+        maxDte: preview.riskProfile.maxDte,
+        maxLoss: preview.riskProfile.maxLoss,
+        maxTradesPerDay: preview.riskProfile.maxTradesPerDay,
+        minDte: preview.riskProfile.minDte,
+      },
+    };
+  }
+
+  async function previewPaperOrder(candidateId: string) {
+    if (state.status !== "success") {
+      return;
+    }
+
+    setOrderState({ candidateId, status: "loading" });
+
+    try {
+      const response = await fetch(
+        `/api/alpaca/spreads/${encodeURIComponent(symbol)}/orders/preview`,
+        {
+          body: JSON.stringify(buildPaperOrderRequest(candidateId, state.data)),
+          cache: "no-store",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          method: "POST",
+        },
+      );
+      const data = await parseJsonApiResponse<PaperMlegOrderPreviewResponse>(
+        response,
+        "Unable to preview the paper mleg order.",
+      );
+
+      setKillSwitch({
+        submissionsDisabled: data.preview.submissionsDisabled,
+      });
+      setOrderState({
+        confirmation: "",
+        data,
+        status: "ready",
+        submitting: false,
+      });
+    } catch (error) {
+      setOrderState({
+        message:
+          error instanceof Error
+            ? error.message
+            : "Unable to preview the paper mleg order.",
+        status: "error",
+      });
+    }
+  }
+
+  async function submitPaperOrder() {
+    if (orderState.status !== "ready") {
+      return;
+    }
+
+    const readyState = orderState;
+
+    setOrderState({
+      ...readyState,
+      submitError: undefined,
+      submitMessage: undefined,
+      submitting: true,
+    });
+
+    try {
+      const response = await fetch(
+        `/api/alpaca/spreads/${encodeURIComponent(symbol)}/orders/submit`,
+        {
+          body: JSON.stringify(buildPaperSubmitRequest(readyState)),
+          cache: "no-store",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          method: "POST",
+        },
+      );
+      const data = await parseJsonApiResponse<PaperMlegOrderSubmitResponse>(
+        response,
+        "Unable to submit the paper mleg order.",
+      );
+
+      setKillSwitch({
+        submissionsDisabled: data.preview.submissionsDisabled,
+      });
+      setOrderState({
+        ...readyState,
+        confirmation: "",
+        data: {
+          fetchedAt: data.submittedAt,
+          preview: data.preview,
+          underlyingSymbol: data.underlyingSymbol,
+        },
+        status: "ready",
+        submitted: data,
+        submitError: undefined,
+        submitting: false,
+        submitMessage: `Paper order ${data.order.id} submitted with status ${data.order.status}.`,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unable to submit the paper mleg order.";
+
+      if (message.includes("kill switch")) {
+        setKillSwitch({ submissionsDisabled: true });
+      }
+
+      setOrderState({
+        ...readyState,
+        status: "ready",
+        submitError: message,
+        submitMessage: undefined,
+        submitting: false,
+      });
+    }
+  }
+
+  async function updateKillSwitch(nextValue: boolean) {
+    setKillSwitchBusy(true);
+    setKillSwitchError(null);
+    setKillSwitchMessage(null);
+
+    try {
+      const response = await fetch("/api/kill-switch", {
+        body: JSON.stringify({ submissionsDisabled: nextValue }),
+        cache: "no-store",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      const data = await parseJsonApiResponse<KillSwitchStatus>(
+        response,
+        "Unable to update order submission status.",
+      );
+
+      setKillSwitch(data);
+      setKillSwitchMessage(
+        data.submissionsDisabled
+          ? "Paper order submissions disabled."
+          : "Paper order submissions enabled.",
+      );
+    } catch (error) {
+      setKillSwitchError(
+        error instanceof Error
+          ? error.message
+          : "Unable to update order submission status.",
+      );
+    } finally {
+      setKillSwitchBusy(false);
+    }
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -263,6 +532,18 @@ export function VerticalSpreadCandidates({
     void loadCandidates(nextFormState);
   }
 
+  const readyOrderState = orderState.status === "ready" ? orderState : null;
+  const readyOrderSubmissionsDisabled = readyOrderState
+    ? (killSwitch?.submissionsDisabled ??
+      readyOrderState.data.preview.submissionsDisabled)
+    : false;
+  const readyOrderCanSubmit = Boolean(
+    readyOrderState &&
+      !readyOrderSubmissionsDisabled &&
+      !readyOrderState.submitting &&
+      readyOrderState.confirmation === PAPER_ORDER_CONFIRMATION_PHRASE,
+  );
+
   return (
     <section className="spread-generator" aria-labelledby="spread-heading">
       <div className="chain-toolbar spread-toolbar">
@@ -282,6 +563,16 @@ export function VerticalSpreadCandidates({
                   symbol: event.target.value.toUpperCase(),
                 }))
               }
+            />
+          </label>
+          <label>
+            Order qty
+            <input
+              min={1}
+              max={10}
+              type="number"
+              value={quantity}
+              onChange={(event) => setQuantity(Number(event.target.value))}
             />
           </label>
           <label>
@@ -325,17 +616,6 @@ export function VerticalSpreadCandidates({
             />
           </label>
           <label>
-            Trades today
-            <input
-              min={0}
-              type="number"
-              value={formState.currentTradesToday}
-              onChange={(event) =>
-                updateNumericField("currentTradesToday", event.target.value)
-              }
-            />
-          </label>
-          <label>
             Max trades/day
             <input
               min={1}
@@ -367,6 +647,44 @@ export function VerticalSpreadCandidates({
           <span key={item}>{item}</span>
         ))}
       </div>
+
+      <section
+        className={`kill-switch-panel ${
+          killSwitch?.submissionsDisabled ? "is-disabled" : ""
+        }`}
+        aria-live="polite"
+      >
+        <div className="kill-switch-copy">
+          <p className="panel-label">Paper submissions</p>
+          <strong>
+            {killSwitch?.submissionsDisabled
+              ? "Kill switch active"
+              : "Submissions enabled"}
+          </strong>
+          {killSwitchMessage ? <p>{killSwitchMessage}</p> : null}
+          {killSwitchError ? (
+            <p className="form-error">{killSwitchError}</p>
+          ) : null}
+        </div>
+        <div className="kill-switch-actions">
+          <button
+            className="button danger"
+            type="button"
+            disabled={killSwitchBusy || killSwitch?.submissionsDisabled === true}
+            onClick={() => void updateKillSwitch(true)}
+          >
+            Disable
+          </button>
+          <button
+            className="button secondary"
+            type="button"
+            disabled={killSwitchBusy || killSwitch?.submissionsDisabled === false}
+            onClick={() => void updateKillSwitch(false)}
+          >
+            Enable
+          </button>
+        </div>
+      </section>
 
       {state.status === "loading" ? (
         <section className="account-card" aria-busy="true">
@@ -412,6 +730,147 @@ export function VerticalSpreadCandidates({
               <strong>{formatDateTime(state.data.fetchedAt)}</strong>
             </div>
           </div>
+
+          {orderState.status === "loading" ? (
+            <section className="account-card paper-order-panel" aria-busy="true">
+              <p className="panel-label">Paper order preview</p>
+              <h2>Preparing Alpaca mleg order</h2>
+              <p className="muted">
+                Selected candidate {orderState.candidateId}
+              </p>
+              <div className="loading-grid chain-loading" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+                <span />
+              </div>
+            </section>
+          ) : null}
+
+          {orderState.status === "error" ? (
+            <section className="account-card error-card" role="alert">
+              <p className="panel-label">Paper order unavailable</p>
+              <h2>Could not preview order</h2>
+              <p>{orderState.message}</p>
+            </section>
+          ) : null}
+
+          {readyOrderState ? (
+            <section className="account-card paper-order-panel" aria-live="polite">
+              <div className="paper-order-header">
+                <div>
+                  <p className="panel-label">Paper order preview</p>
+                  <h2>
+                    {strategyLabels[readyOrderState.data.preview.candidate.strategy]}
+                  </h2>
+                </div>
+                <span className="option-type call">mleg limit</span>
+              </div>
+
+              <div className="paper-order-summary">
+                <div>
+                  <span>Quantity</span>
+                  <strong>{readyOrderState.data.preview.order.qty}</strong>
+                </div>
+                <div>
+                  <span>Limit price</span>
+                  <strong>
+                    {formatCurrency(
+                      Number(readyOrderState.data.preview.order.limit_price),
+                    )}
+                  </strong>
+                </div>
+                <div>
+                  <span>Estimated max loss</span>
+                  <strong>
+                    {formatCurrency(readyOrderState.data.preview.estimatedMaxLoss)}
+                  </strong>
+                </div>
+                <div>
+                  <span>Estimated max profit</span>
+                  <strong>
+                    {formatCurrency(
+                      readyOrderState.data.preview.estimatedMaxProfit,
+                    )}
+                  </strong>
+                </div>
+              </div>
+
+              <div className="legs-table paper-order-legs" aria-label="Order legs">
+                {readyOrderState.data.preview.order.legs.map((leg) => (
+                  <div key={`${readyOrderState.data.preview.candidate.id}:${leg.symbol}`}>
+                    <span>{leg.side}</span>
+                    <strong>{leg.symbol}</strong>
+                    <small>{leg.position_intent}</small>
+                    <small>Ratio {leg.ratio_qty}</small>
+                  </div>
+                ))}
+              </div>
+
+              <ul className="risk-check-list">
+                {readyOrderState.data.preview.riskChecks.map((check) => (
+                  <li key={`preview:${check.name}`}>
+                    <span>{check.label}</span>
+                    <strong>{check.value}</strong>
+                    <small>{check.limit}</small>
+                  </li>
+                ))}
+              </ul>
+
+              {readyOrderSubmissionsDisabled ? (
+                <p className="paper-order-warning" role="status">
+                  Kill switch active. Paper order submission is disabled.
+                </p>
+              ) : null}
+
+              <label className="paper-order-confirmation">
+                Type {PAPER_ORDER_CONFIRMATION_PHRASE} to submit
+                <input
+                  autoComplete="off"
+                  value={readyOrderState.confirmation}
+                  onChange={(event) => {
+                    const nextConfirmation = event.target.value;
+
+                    setOrderState((current) =>
+                      current.status === "ready"
+                        ? {
+                            ...current,
+                            confirmation: nextConfirmation,
+                            submitError: undefined,
+                          }
+                        : current,
+                    );
+                  }}
+                />
+              </label>
+
+              <div className="paper-order-actions">
+                <button
+                  className="button"
+                  type="button"
+                  disabled={!readyOrderCanSubmit}
+                  onClick={() => void submitPaperOrder()}
+                >
+                  {readyOrderState.submitting
+                    ? "Submitting..."
+                    : "Submit paper order"}
+                </button>
+                {readyOrderState.submitError ? (
+                  <p className="form-error">{readyOrderState.submitError}</p>
+                ) : null}
+                {readyOrderState.submitMessage ? (
+                  <p className="form-success">{readyOrderState.submitMessage}</p>
+                ) : null}
+                {readyOrderState.submitted ? (
+                  <p className="muted">
+                    Client order{" "}
+                    {readyOrderState.submitted.order.client_order_id ??
+                      "generated by Alpaca"}
+                  </p>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
 
           {state.data.candidates.length > 0 ? (
             <div className="candidate-grid">
@@ -480,6 +939,25 @@ export function VerticalSpreadCandidates({
                       </li>
                     ))}
                   </ul>
+
+                  <div className="candidate-actions">
+                    <button
+                      className="button secondary"
+                      type="button"
+                      disabled={
+                        quantity < 1 ||
+                        quantity > 10 ||
+                        (orderState.status === "loading" &&
+                          orderState.candidateId === candidate.id)
+                      }
+                      onClick={() => void previewPaperOrder(candidate.id)}
+                    >
+                      {orderState.status === "loading" &&
+                      orderState.candidateId === candidate.id
+                        ? "Previewing..."
+                        : "Preview paper order"}
+                    </button>
+                  </div>
                 </article>
               ))}
             </div>

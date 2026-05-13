@@ -25,6 +25,9 @@ const rawServerEnvSchema = z
     ALPACA_API_SECRET_KEY: requiredSecret.optional(),
     APCA_API_KEY_ID: requiredSecret.optional(),
     APCA_API_SECRET_KEY: requiredSecret.optional(),
+    ORDER_SUBMISSIONS_DISABLED: z
+      .enum(["true", "false"])
+      .default("false"),
   })
   .superRefine((env, context) => {
     if (!isPaperTradingBaseUrl(env.ALPACA_TRADING_BASE_URL)) {
@@ -61,6 +64,7 @@ const rawServerEnvSchema = z
       apiKeyId: env.ALPACA_API_KEY_ID ?? env.APCA_API_KEY_ID ?? "",
       apiSecretKey: env.ALPACA_API_SECRET_KEY ?? env.APCA_API_SECRET_KEY ?? "",
     },
+    orderSubmissionsDisabled: env.ORDER_SUBMISSIONS_DISABLED === "true",
   }));
 
 export type ServerEnv = z.infer<typeof rawServerEnvSchema>;
