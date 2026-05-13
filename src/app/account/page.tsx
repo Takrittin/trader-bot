@@ -1,9 +1,8 @@
-import Link from "next/link";
 import { AccountDashboard } from "@/features/account/components/account-dashboard";
 
 export default function AccountPage() {
   return (
-    <main className="app-shell">
+    <main className="app-shell workspace-page">
       <section className="page-header">
         <div>
           <p className="eyebrow">Paper account</p>
@@ -13,9 +12,6 @@ export default function AccountPage() {
             code never receives Alpaca credentials.
           </p>
         </div>
-        <Link className="button secondary" href="/">
-          Overview
-        </Link>
       </section>
 
       <AccountDashboard />

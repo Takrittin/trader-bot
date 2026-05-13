@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { AppSidebar } from "@/app/components/app-sidebar";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -14,7 +15,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <div className="app-frame">
+          <AppSidebar />
+          <div className="app-main">{children}</div>
+        </div>
+      </body>
     </html>
   );
 }

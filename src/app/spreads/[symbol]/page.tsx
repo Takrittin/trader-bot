@@ -34,7 +34,7 @@ export default async function SpreadCandidatesPage({
   }
 
   return (
-    <main className="app-shell">
+    <main className="app-shell workspace-page">
       <section className="page-header">
         <div>
           <p className="eyebrow">Candidate generator</p>
@@ -47,9 +47,6 @@ export default async function SpreadCandidatesPage({
         <div className="page-actions">
           <Link className="button secondary" href={`/options/${symbol}`}>
             Option chain
-          </Link>
-          <Link className="button secondary" href="/">
-            Overview
           </Link>
         </div>
       </section>

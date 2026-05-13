@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { OptionChain } from "@/features/options/components/option-chain";
 import { normalizeUnderlyingSymbol } from "@/features/options/symbol";
@@ -34,7 +33,7 @@ export default async function OptionChainPage({
   }
 
   return (
-    <main className="app-shell">
+    <main className="app-shell workspace-page">
       <section className="page-header">
         <div>
           <p className="eyebrow">Option chain</p>
@@ -44,9 +43,6 @@ export default async function OptionChainPage({
             Alpaca credentials stay server-side.
           </p>
         </div>
-        <Link className="button secondary" href="/">
-          Overview
-        </Link>
       </section>
 
       <OptionChain key={symbol} symbol={symbol} />
