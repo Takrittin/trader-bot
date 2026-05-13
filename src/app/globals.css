@@ -110,6 +110,13 @@ h2 {
   color: var(--foreground);
 }
 
+.page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
 .hero-actions {
   display: flex;
   flex-wrap: wrap;
@@ -170,6 +177,12 @@ h2 {
 }
 
 .option-chain {
+  display: grid;
+  gap: 16px;
+  padding: 32px 0;
+}
+
+.spread-generator {
   display: grid;
   gap: 16px;
   padding: 32px 0;
@@ -325,6 +338,150 @@ h2 {
   text-transform: uppercase;
 }
 
+.spread-toolbar {
+  grid-template-columns: 220px minmax(0, 1fr);
+  align-items: start;
+}
+
+.risk-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr)) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.risk-form label {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.risk-form input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 750;
+}
+
+.risk-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.risk-summary span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent), var(--border) 50%);
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.candidate-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.candidate-card {
+  display: grid;
+  gap: 18px;
+  padding: 20px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.candidate-header {
+  display: flex;
+  gap: 16px;
+  align-items: start;
+  justify-content: space-between;
+}
+
+.candidate-header h3 {
+  margin: 0;
+  font-size: 1.35rem;
+  line-height: 1.1;
+}
+
+.candidate-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.candidate-metrics div,
+.legs-table div,
+.risk-check-list li {
+  min-width: 0;
+  padding: 12px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.candidate-metrics span,
+.legs-table span,
+.risk-check-list span {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.candidate-metrics strong,
+.legs-table strong,
+.risk-check-list strong {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 0.98rem;
+}
+
+.legs-table {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.legs-table span {
+  color: var(--accent);
+}
+
+.legs-table small,
+.risk-check-list small {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.risk-check-list {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
 .table-shell {
   overflow-x: auto;
   background: var(--panel);
@@ -442,7 +599,8 @@ h2 {
   .grid-section,
   .page-header,
   .account-summary,
-  .chain-toolbar {
+  .chain-toolbar,
+  .risk-form {
     grid-template-columns: 1fr;
     gap: 24px;
   }
@@ -452,8 +610,16 @@ h2 {
   .metric-grid,
   .chain-stats,
   .detail-grid,
-  .loading-grid {
+  .loading-grid,
+  .candidate-grid,
+  .candidate-metrics,
+  .legs-table,
+  .risk-check-list {
     grid-template-columns: 1fr;
+  }
+
+  .page-actions {
+    justify-content: stretch;
   }
 
   .symbol-form div {

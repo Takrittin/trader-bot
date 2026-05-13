@@ -40,6 +40,9 @@ export default function Home() {
             <Link className="button secondary" href="/options/SPY">
               Open SPY option chain
             </Link>
+            <Link className="button secondary" href="/spreads/SPY">
+              Generate spreads
+            </Link>
           </div>
         </div>
         <div className="mode-panel" aria-label="Trading mode status">

@@ -16,6 +16,7 @@ type ReadonlyRequestOptions = {
 
 type OptionContractsParams = {
   expirationDateGte?: string;
+  expirationDateLte?: string;
   underlyingSymbols: string[];
   limit?: number;
   status?: "active" | "inactive";
@@ -23,6 +24,7 @@ type OptionContractsParams = {
 
 type OptionSnapshotsParams = {
   expirationDateGte?: string;
+  expirationDateLte?: string;
   feed?: "opra" | "indicative";
   limit?: number;
 };
@@ -94,6 +96,10 @@ export class AlpacaPaperClient {
       searchParams.set("expiration_date_gte", params.expirationDateGte);
     }
 
+    if (params.expirationDateLte) {
+      searchParams.set("expiration_date_lte", params.expirationDateLte);
+    }
+
     return this.get(`/v2/options/contracts?${searchParams}`, options);
   }
 
@@ -114,6 +120,10 @@ export class AlpacaPaperClient {
 
     if (params.expirationDateGte) {
       searchParams.set("expiration_date_gte", params.expirationDateGte);
+    }
+
+    if (params.expirationDateLte) {
+      searchParams.set("expiration_date_lte", params.expirationDateLte);
     }
 
     const query = searchParams.size > 0 ? `?${searchParams}` : "";
