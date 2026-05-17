@@ -3,9 +3,11 @@ import {
   areSubmissionsDisabled,
   setSubmissionsDisabled,
 } from "@/features/kill-switch/state";
+import { recordAuditEvent } from "@/features/journal/database";
 import type { KillSwitchStatus } from "@/features/kill-switch/types";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 export function GET(): NextResponse<KillSwitchStatus> {
   return NextResponse.json({
@@ -25,7 +27,15 @@ export async function POST(request: Request): Promise<NextResponse<KillSwitchSta
     );
   }
 
-  return NextResponse.json({
-    submissionsDisabled: setSubmissionsDisabled(body.submissionsDisabled),
+  const submissionsDisabled = setSubmissionsDisabled(body.submissionsDisabled);
+
+  recordAuditEvent({
+    details: {
+      requestedSubmissionsDisabled: body.submissionsDisabled,
+      submissionsDisabled,
+    },
+    eventType: "kill_switch_updated",
   });
+
+  return NextResponse.json({ submissionsDisabled });
 }

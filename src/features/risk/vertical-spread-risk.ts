@@ -9,6 +9,7 @@ type RiskCandidateInput = {
   dte: number;
   maxBidAskWidth: number;
   maxLoss: number;
+  minOpenInterest: number | null;
 };
 
 function formatCurrency(value: number): string {
@@ -57,6 +58,39 @@ export function evaluateVerticalSpreadRisk(
       name: "max_trades_per_day",
       passed: profile.currentTradesToday < profile.maxTradesPerDay,
       value: formatNumber(profile.currentTradesToday),
+    },
+    {
+      label: "Daily risk",
+      limit: `<= ${formatCurrency(profile.maxDailyRisk)}`,
+      name: "max_daily_risk",
+      passed: profile.currentDailyRisk + candidate.maxLoss <= profile.maxDailyRisk,
+      value: formatCurrency(profile.currentDailyRisk + candidate.maxLoss),
+    },
+    {
+      label: "Open trades",
+      limit: `< ${formatNumber(profile.maxOpenTrades)}`,
+      name: "max_open_trades",
+      passed: profile.currentOpenTrades < profile.maxOpenTrades,
+      value: formatNumber(profile.currentOpenTrades),
+    },
+    {
+      label: "Symbol trades",
+      limit: `< ${formatNumber(profile.maxTradesPerSymbol)}`,
+      name: "max_trades_per_symbol",
+      passed: profile.currentSymbolTradesToday < profile.maxTradesPerSymbol,
+      value: formatNumber(profile.currentSymbolTradesToday),
+    },
+    {
+      label: "Open interest",
+      limit: `>= ${formatNumber(profile.minOpenInterest)}`,
+      name: "min_open_interest",
+      passed:
+        candidate.minOpenInterest !== null &&
+        candidate.minOpenInterest >= profile.minOpenInterest,
+      value:
+        candidate.minOpenInterest === null
+          ? "Not available"
+          : formatNumber(candidate.minOpenInterest),
     },
   ];
 }

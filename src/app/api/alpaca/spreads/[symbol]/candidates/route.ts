@@ -6,6 +6,7 @@ import {
   defaultVerticalSpreadRiskProfile,
   type VerticalSpreadRiskProfile,
 } from "@/features/risk/types";
+import { getJournalRiskUsage } from "@/features/journal/database";
 import { getTodaysMlegOrderCount } from "@/features/orders/paper-mleg";
 import { generateVerticalSpreadCandidates } from "@/features/spreads/generator";
 import type {
@@ -14,6 +15,7 @@ import type {
 } from "@/features/spreads/types";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 type RouteContext = {
   params: Promise<{
@@ -66,12 +68,23 @@ function parseRiskProfile(searchParams: URLSearchParams): {
         0,
         100,
       ),
+      currentDailyRisk: defaultVerticalSpreadRiskProfile.currentDailyRisk,
+      currentOpenTrades: defaultVerticalSpreadRiskProfile.currentOpenTrades,
+      currentSymbolTradesToday:
+        defaultVerticalSpreadRiskProfile.currentSymbolTradesToday,
       maxBidAskWidth: parseNumberParam(
         searchParams,
         "maxBidAskWidth",
         defaultVerticalSpreadRiskProfile.maxBidAskWidth,
         0.01,
         25,
+      ),
+      maxDailyRisk: parseNumberParam(
+        searchParams,
+        "maxDailyRisk",
+        defaultVerticalSpreadRiskProfile.maxDailyRisk,
+        1,
+        1_000_000,
       ),
       maxDte,
       maxLoss: parseNumberParam(
@@ -81,12 +94,33 @@ function parseRiskProfile(searchParams: URLSearchParams): {
         1,
         100_000,
       ),
+      maxOpenTrades: parseNumberParam(
+        searchParams,
+        "maxOpenTrades",
+        defaultVerticalSpreadRiskProfile.maxOpenTrades,
+        1,
+        100,
+      ),
       maxTradesPerDay: parseNumberParam(
         searchParams,
         "maxTradesPerDay",
         defaultVerticalSpreadRiskProfile.maxTradesPerDay,
         1,
         100,
+      ),
+      maxTradesPerSymbol: parseNumberParam(
+        searchParams,
+        "maxTradesPerSymbol",
+        defaultVerticalSpreadRiskProfile.maxTradesPerSymbol,
+        1,
+        100,
+      ),
+      minOpenInterest: parseNumberParam(
+        searchParams,
+        "minOpenInterest",
+        defaultVerticalSpreadRiskProfile.minOpenInterest,
+        0,
+        1_000_000,
       ),
       minDte,
     },
@@ -128,10 +162,17 @@ export async function GET(
 
   try {
     const client = createAlpacaPaperClient();
-    const currentTradesToday = await getTodaysMlegOrderCount(client);
+    const [currentTradesToday, journalRiskUsage] = await Promise.all([
+      getTodaysMlegOrderCount(client),
+      Promise.resolve(getJournalRiskUsage(symbol)),
+    ]);
     const effectiveRiskProfile = {
       ...riskProfile,
-      currentTradesToday,
+      ...journalRiskUsage,
+      currentTradesToday: Math.max(
+        currentTradesToday,
+        journalRiskUsage.currentTradesToday,
+      ),
     };
     const expirationDateGte = getIsoDateOffset(riskProfile.minDte);
     const expirationDateLte = getIsoDateOffset(riskProfile.maxDte);

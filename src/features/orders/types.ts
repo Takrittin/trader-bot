@@ -1,5 +1,9 @@
 import type { AlpacaMlegLimitOrderRequest, AlpacaOrder } from "@/lib/alpaca/types";
-import type { RiskCheckResult, VerticalSpreadRiskProfile } from "@/features/risk/types";
+import type {
+  ConfigurableVerticalSpreadRiskProfile,
+  RiskCheckResult,
+  VerticalSpreadRiskProfile,
+} from "@/features/risk/types";
 import type { VerticalSpreadCandidate } from "@/features/spreads/types";
 
 export const PAPER_ORDER_CONFIRMATION_PHRASE = "SUBMIT PAPER ORDER";
@@ -8,7 +12,7 @@ export type PaperMlegOrderPreviewRequest = {
   candidateId: string;
   limit?: number;
   quantity: number;
-  riskProfile: Omit<VerticalSpreadRiskProfile, "currentTradesToday">;
+  riskProfile: ConfigurableVerticalSpreadRiskProfile;
 };
 
 export type PaperMlegOrderPreview = {

@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { AlpacaClientError, createAlpacaPaperClient } from "@/lib/alpaca/client";
 import { areSubmissionsDisabled } from "@/features/kill-switch/state";
+import {
+  recordAuditEvent,
+  recordPaperOrderSubmission,
+} from "@/features/journal/database";
 import { normalizeUnderlyingSymbol } from "@/features/options/symbol";
+import { defaultVerticalSpreadRiskProfile } from "@/features/risk/types";
 import {
   createPaperMlegOrderPreview,
   PaperOrderPreviewError,
@@ -14,6 +19,7 @@ import {
 } from "@/features/orders/types";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 type RouteContext = {
   params: Promise<{
@@ -56,11 +62,39 @@ function parseSubmitRequest(body: unknown): PaperMlegOrderSubmitRequest {
     limit: typeof value.limit === "number" ? value.limit : 100,
     quantity: typeof value.quantity === "number" ? value.quantity : 1,
     riskProfile: {
-      maxBidAskWidth: Number(value.riskProfile.maxBidAskWidth),
-      maxDte: Number(value.riskProfile.maxDte),
-      maxLoss: Number(value.riskProfile.maxLoss),
-      maxTradesPerDay: Number(value.riskProfile.maxTradesPerDay),
-      minDte: Number(value.riskProfile.minDte),
+      maxBidAskWidth: Number(
+        value.riskProfile.maxBidAskWidth ??
+          defaultVerticalSpreadRiskProfile.maxBidAskWidth,
+      ),
+      maxDailyRisk: Number(
+        value.riskProfile.maxDailyRisk ??
+          defaultVerticalSpreadRiskProfile.maxDailyRisk,
+      ),
+      maxDte: Number(
+        value.riskProfile.maxDte ?? defaultVerticalSpreadRiskProfile.maxDte,
+      ),
+      maxLoss: Number(
+        value.riskProfile.maxLoss ?? defaultVerticalSpreadRiskProfile.maxLoss,
+      ),
+      maxOpenTrades: Number(
+        value.riskProfile.maxOpenTrades ??
+          defaultVerticalSpreadRiskProfile.maxOpenTrades,
+      ),
+      maxTradesPerDay: Number(
+        value.riskProfile.maxTradesPerDay ??
+          defaultVerticalSpreadRiskProfile.maxTradesPerDay,
+      ),
+      maxTradesPerSymbol: Number(
+        value.riskProfile.maxTradesPerSymbol ??
+          defaultVerticalSpreadRiskProfile.maxTradesPerSymbol,
+      ),
+      minDte: Number(
+        value.riskProfile.minDte ?? defaultVerticalSpreadRiskProfile.minDte,
+      ),
+      minOpenInterest: Number(
+        value.riskProfile.minOpenInterest ??
+          defaultVerticalSpreadRiskProfile.minOpenInterest,
+      ),
     },
   };
 }
@@ -77,6 +111,14 @@ export async function POST(
   }
 
   if (areSubmissionsDisabled()) {
+    recordAuditEvent({
+      details: {
+        reason: "kill_switch",
+        underlyingSymbol: symbol,
+      },
+      eventType: "paper_order_blocked",
+    });
+
     return jsonError("Order submissions are disabled by the kill switch.", 423);
   }
 
@@ -92,10 +134,24 @@ export async function POST(
     });
 
     if (areSubmissionsDisabled()) {
+      recordAuditEvent({
+        details: {
+          candidateId: preview.candidate.id,
+          reason: "kill_switch",
+          underlyingSymbol: symbol,
+        },
+        eventType: "paper_order_blocked",
+      });
+
       return jsonError("Order submissions are disabled by the kill switch.", 423);
     }
 
     const order = await client.submitMlegLimitOrder(preview.order);
+    recordPaperOrderSubmission({
+      order,
+      preview,
+      underlyingSymbol: symbol,
+    });
 
     console.info("Submitted paper mleg limit order", {
       orderId: order.id,
@@ -126,6 +182,14 @@ export async function POST(
         responseBody: error.responseBody,
         status: error.status,
         statusText: error.statusText,
+      });
+      recordAuditEvent({
+        details: {
+          status: error.status,
+          statusText: error.statusText,
+          underlyingSymbol: symbol,
+        },
+        eventType: "paper_order_submission_failed",
       });
 
       return jsonError("Unable to submit the paper mleg order.", error.status);

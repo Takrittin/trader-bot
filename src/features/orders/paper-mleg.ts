@@ -3,9 +3,13 @@ import "server-only";
 import type { AlpacaPaperClient } from "@/lib/alpaca/client";
 import type { AlpacaMlegLimitOrderRequest, AlpacaOrder } from "@/lib/alpaca/types";
 import { areSubmissionsDisabled } from "@/features/kill-switch/state";
+import { getJournalRiskUsage, hasOpenCandidate } from "@/features/journal/database";
 import { getIsoDateOffset } from "@/features/options/date";
 import { evaluateVerticalSpreadRisk } from "@/features/risk/vertical-spread-risk";
-import type { VerticalSpreadRiskProfile } from "@/features/risk/types";
+import type {
+  ConfigurableVerticalSpreadRiskProfile,
+  VerticalSpreadRiskProfile,
+} from "@/features/risk/types";
 import { generateVerticalSpreadCandidates } from "@/features/spreads/generator";
 import type { VerticalSpreadCandidate } from "@/features/spreads/types";
 import type {
@@ -109,8 +113,8 @@ function buildMlegLimitOrder(
 }
 
 function validateRiskProfile(
-  riskProfile: Omit<VerticalSpreadRiskProfile, "currentTradesToday">,
-): Omit<VerticalSpreadRiskProfile, "currentTradesToday"> {
+  riskProfile: ConfigurableVerticalSpreadRiskProfile,
+): ConfigurableVerticalSpreadRiskProfile {
   if (riskProfile.minDte < 1 || riskProfile.maxDte < riskProfile.minDte) {
     throw new PaperOrderPreviewError("Expiration range is invalid.");
   }
@@ -125,6 +129,22 @@ function validateRiskProfile(
 
   if (riskProfile.maxTradesPerDay < 1) {
     throw new PaperOrderPreviewError("Max trades per day must be at least one.");
+  }
+
+  if (riskProfile.maxDailyRisk <= 0) {
+    throw new PaperOrderPreviewError("Max daily risk must be greater than zero.");
+  }
+
+  if (riskProfile.maxOpenTrades < 1) {
+    throw new PaperOrderPreviewError("Max open trades must be at least one.");
+  }
+
+  if (riskProfile.maxTradesPerSymbol < 1) {
+    throw new PaperOrderPreviewError("Max trades per symbol must be at least one.");
+  }
+
+  if (riskProfile.minOpenInterest < 0) {
+    throw new PaperOrderPreviewError("Minimum open interest cannot be negative.");
   }
 
   return riskProfile;
@@ -143,10 +163,17 @@ export async function createPaperMlegOrderPreview({
 }): Promise<PaperMlegOrderPreview> {
   const quantity = toQuantity(request.quantity);
   const requestedRiskProfile = validateRiskProfile(request.riskProfile);
-  const currentTradesToday = await getTodaysMlegOrderCount(client);
+  const [currentTradesToday, journalRiskUsage] = await Promise.all([
+    getTodaysMlegOrderCount(client),
+    Promise.resolve(getJournalRiskUsage(symbol)),
+  ]);
   const riskProfile: VerticalSpreadRiskProfile = {
     ...requestedRiskProfile,
-    currentTradesToday,
+    ...journalRiskUsage,
+    currentTradesToday: Math.max(
+      currentTradesToday,
+      journalRiskUsage.currentTradesToday,
+    ),
   };
   const expirationDateGte = getIsoDateOffset(riskProfile.minDte);
   const expirationDateLte = getIsoDateOffset(riskProfile.maxDte);
@@ -181,6 +208,13 @@ export async function createPaperMlegOrderPreview({
     );
   }
 
+  if (hasOpenCandidate(candidate.id)) {
+    throw new PaperOrderPreviewError(
+      "An open paper order already exists for this spread candidate.",
+      409,
+    );
+  }
+
   const estimatedMaxLoss = Math.round(candidate.maxLoss * quantity * 100) / 100;
   const estimatedMaxProfit =
     Math.round(candidate.maxProfit * quantity * 100) / 100;
@@ -189,6 +223,7 @@ export async function createPaperMlegOrderPreview({
       dte: candidate.dte,
       maxBidAskWidth: candidate.maxBidAskWidth,
       maxLoss: estimatedMaxLoss,
+      minOpenInterest: candidate.minOpenInterest,
     },
     riskProfile,
   );

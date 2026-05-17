@@ -125,6 +125,13 @@ export class AlpacaPaperClient {
     return this.get(`/v2/orders${query}`, options);
   }
 
+  getOrder(
+    orderId: string,
+    options?: ReadonlyRequestOptions,
+  ): Promise<AlpacaOrder> {
+    return this.get(`/v2/orders/${encodeURIComponent(orderId)}`, options);
+  }
+
   getOptionContracts(
     params: OptionContractsParams,
     options?: ReadonlyRequestOptions,

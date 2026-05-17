@@ -20,8 +20,23 @@ export type VerticalSpreadLeg = {
   theta: number | null;
 };
 
+export type VerticalSpreadScoreGrade = "A" | "B" | "C" | "D";
+
+export type VerticalSpreadExplanation = {
+  grade: VerticalSpreadScoreGrade;
+  points: string[];
+  score: number;
+  scoreParts: {
+    dte: number;
+    liquidity: number;
+    openInterest: number;
+    rewardRisk: number;
+  };
+};
+
 export type VerticalSpreadCandidate = {
   ask: number;
+  breakeven: number;
   bid: number;
   dte: number;
   expirationDate: string;
@@ -30,9 +45,14 @@ export type VerticalSpreadCandidate = {
   maxBidAskWidth: number;
   maxLoss: number;
   maxProfit: number;
+  minOpenInterest: number | null;
   netCredit: number | null;
   netDebit: number | null;
+  rewardRiskRatio: number;
   riskChecks: RiskCheckResult[];
+  score: number;
+  scoreGrade: VerticalSpreadScoreGrade;
+  scoring: VerticalSpreadExplanation;
   strategy: VerticalSpreadStrategy;
   type: "call" | "put";
   width: number;

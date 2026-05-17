@@ -13,6 +13,7 @@ import {
 } from "@/features/orders/types";
 import { normalizeUnderlyingSymbol } from "@/features/options/symbol";
 import {
+  type ConfigurableVerticalSpreadRiskProfile,
   defaultVerticalSpreadRiskProfile,
   type VerticalSpreadRiskProfile,
 } from "@/features/risk/types";
@@ -68,9 +69,13 @@ function buildEndpoint(formState: CandidateFormState): string {
   const params = new URLSearchParams({
     limit: String(formState.limit),
     maxBidAskWidth: String(formState.maxBidAskWidth),
+    maxDailyRisk: String(formState.maxDailyRisk),
     maxDte: String(formState.maxDte),
     maxLoss: String(formState.maxLoss),
+    maxOpenTrades: String(formState.maxOpenTrades),
     maxTradesPerDay: String(formState.maxTradesPerDay),
+    maxTradesPerSymbol: String(formState.maxTradesPerSymbol),
+    minOpenInterest: String(formState.minOpenInterest),
     minDte: String(formState.minDte),
   });
 
@@ -195,6 +200,22 @@ function getPremiumLabel(candidate: VerticalSpreadCandidate): string {
   return `Credit ${formatCurrency(candidate.netCredit)}`;
 }
 
+function toConfigurableRiskProfile(
+  profile: VerticalSpreadRiskProfile,
+): ConfigurableVerticalSpreadRiskProfile {
+  return {
+    maxBidAskWidth: profile.maxBidAskWidth,
+    maxDailyRisk: profile.maxDailyRisk,
+    maxDte: profile.maxDte,
+    maxLoss: profile.maxLoss,
+    maxOpenTrades: profile.maxOpenTrades,
+    maxTradesPerDay: profile.maxTradesPerDay,
+    maxTradesPerSymbol: profile.maxTradesPerSymbol,
+    minDte: profile.minDte,
+    minOpenInterest: profile.minOpenInterest,
+  };
+}
+
 export function VerticalSpreadCandidates({
   symbol,
 }: VerticalSpreadCandidatesProps) {
@@ -305,6 +326,11 @@ export function VerticalSpreadCandidates({
       `${profile.minDte}-${profile.maxDte} DTE`,
       `Bid/ask <= ${formatCurrency(profile.maxBidAskWidth)}`,
       `Paper trades ${profile.currentTradesToday}/${profile.maxTradesPerDay}`,
+      `Open ${profile.currentOpenTrades}/${profile.maxOpenTrades}`,
+      `Daily risk ${formatCurrency(profile.currentDailyRisk)}/${formatCurrency(
+        profile.maxDailyRisk,
+      )}`,
+      `Min OI ${formatWholeNumber(profile.minOpenInterest)}`,
     ];
   }, [formState, state]);
 
@@ -322,19 +348,11 @@ export function VerticalSpreadCandidates({
     candidateId: string,
     source: VerticalSpreadCandidatesResponse,
   ): PaperMlegOrderPreviewRequest {
-    const riskProfile = source.riskProfile;
-
     return {
       candidateId,
       limit: formState.limit,
       quantity,
-      riskProfile: {
-        maxBidAskWidth: riskProfile.maxBidAskWidth,
-        maxDte: riskProfile.maxDte,
-        maxLoss: riskProfile.maxLoss,
-        maxTradesPerDay: riskProfile.maxTradesPerDay,
-        minDte: riskProfile.minDte,
-      },
+      riskProfile: toConfigurableRiskProfile(source.riskProfile),
     };
   }
 
@@ -348,13 +366,7 @@ export function VerticalSpreadCandidates({
       confirmation: readyState.confirmation,
       limit: formState.limit,
       quantity: preview.quantity,
-      riskProfile: {
-        maxBidAskWidth: preview.riskProfile.maxBidAskWidth,
-        maxDte: preview.riskProfile.maxDte,
-        maxLoss: preview.riskProfile.maxLoss,
-        maxTradesPerDay: preview.riskProfile.maxTradesPerDay,
-        minDte: preview.riskProfile.minDte,
-      },
+      riskProfile: toConfigurableRiskProfile(preview.riskProfile),
     };
   }
 
@@ -586,6 +598,18 @@ export function VerticalSpreadCandidates({
             />
           </label>
           <label>
+            Daily risk
+            <input
+              min={1}
+              step={100}
+              type="number"
+              value={formState.maxDailyRisk}
+              onChange={(event) =>
+                updateNumericField("maxDailyRisk", event.target.value)
+              }
+            />
+          </label>
+          <label>
             Min DTE
             <input
               min={1}
@@ -616,6 +640,18 @@ export function VerticalSpreadCandidates({
             />
           </label>
           <label>
+            Min OI
+            <input
+              min={0}
+              step={10}
+              type="number"
+              value={formState.minOpenInterest}
+              onChange={(event) =>
+                updateNumericField("minOpenInterest", event.target.value)
+              }
+            />
+          </label>
+          <label>
             Max trades/day
             <input
               min={1}
@@ -623,6 +659,28 @@ export function VerticalSpreadCandidates({
               value={formState.maxTradesPerDay}
               onChange={(event) =>
                 updateNumericField("maxTradesPerDay", event.target.value)
+              }
+            />
+          </label>
+          <label>
+            Max open
+            <input
+              min={1}
+              type="number"
+              value={formState.maxOpenTrades}
+              onChange={(event) =>
+                updateNumericField("maxOpenTrades", event.target.value)
+              }
+            />
+          </label>
+          <label>
+            Max symbol/day
+            <input
+              min={1}
+              type="number"
+              value={formState.maxTradesPerSymbol}
+              onChange={(event) =>
+                updateNumericField("maxTradesPerSymbol", event.target.value)
               }
             />
           </label>
@@ -769,6 +827,13 @@ export function VerticalSpreadCandidates({
 
               <div className="paper-order-summary">
                 <div>
+                  <span>Score</span>
+                  <strong>
+                    {readyOrderState.data.preview.candidate.scoreGrade} ·{" "}
+                    {readyOrderState.data.preview.candidate.score}
+                  </strong>
+                </div>
+                <div>
                   <span>Quantity</span>
                   <strong>{readyOrderState.data.preview.order.qty}</strong>
                 </div>
@@ -791,6 +856,14 @@ export function VerticalSpreadCandidates({
                   <strong>
                     {formatCurrency(
                       readyOrderState.data.preview.estimatedMaxProfit,
+                    )}
+                  </strong>
+                </div>
+                <div>
+                  <span>Breakeven</span>
+                  <strong>
+                    {formatCurrency(
+                      readyOrderState.data.preview.candidate.breakeven,
                     )}
                   </strong>
                 </div>
@@ -893,8 +966,10 @@ export function VerticalSpreadCandidates({
 
                   <div className="candidate-metrics">
                     <div>
-                      <span>Width</span>
-                      <strong>{formatCurrency(candidate.width)}</strong>
+                      <span>Score</span>
+                      <strong>
+                        {candidate.scoreGrade} · {candidate.score}
+                      </strong>
                     </div>
                     <div>
                       <span>Premium</span>
@@ -908,6 +983,24 @@ export function VerticalSpreadCandidates({
                       <span>Max profit</span>
                       <strong>{formatCurrency(candidate.maxProfit)}</strong>
                     </div>
+                    <div>
+                      <span>Reward/risk</span>
+                      <strong>{candidate.rewardRiskRatio.toFixed(2)}:1</strong>
+                    </div>
+                  </div>
+
+                  <div className="candidate-explain">
+                    <strong>Why this candidate</strong>
+                    <ul>
+                      {candidate.scoring.points.map((point) => (
+                        <li key={`${candidate.id}:${point}`}>{point}</li>
+                      ))}
+                    </ul>
+                    <small>
+                      Width {formatCurrency(candidate.width)} · breakeven{" "}
+                      {formatCurrency(candidate.breakeven)} · min OI{" "}
+                      {candidate.minOpenInterest ?? "Not available"}
+                    </small>
                   </div>
 
                   <div className="legs-table" aria-label="Spread legs">

@@ -35,5 +35,6 @@ pnpm-debug.log*
 dist/
 build/
 coverage/
+.data/
 *.tsbuildinfo
 *.log

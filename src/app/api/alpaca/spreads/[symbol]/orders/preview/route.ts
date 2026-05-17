@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { AlpacaClientError, createAlpacaPaperClient } from "@/lib/alpaca/client";
+import { recordAuditEvent } from "@/features/journal/database";
 import { normalizeUnderlyingSymbol } from "@/features/options/symbol";
+import { defaultVerticalSpreadRiskProfile } from "@/features/risk/types";
 import {
   createPaperMlegOrderPreview,
   PaperOrderPreviewError,
@@ -12,6 +14,7 @@ import type {
 } from "@/features/orders/types";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 type RouteContext = {
   params: Promise<{
@@ -49,11 +52,39 @@ function parsePreviewRequest(body: unknown): PaperMlegOrderPreviewRequest {
     limit: typeof value.limit === "number" ? value.limit : 100,
     quantity: typeof value.quantity === "number" ? value.quantity : 1,
     riskProfile: {
-      maxBidAskWidth: Number(value.riskProfile.maxBidAskWidth),
-      maxDte: Number(value.riskProfile.maxDte),
-      maxLoss: Number(value.riskProfile.maxLoss),
-      maxTradesPerDay: Number(value.riskProfile.maxTradesPerDay),
-      minDte: Number(value.riskProfile.minDte),
+      maxBidAskWidth: Number(
+        value.riskProfile.maxBidAskWidth ??
+          defaultVerticalSpreadRiskProfile.maxBidAskWidth,
+      ),
+      maxDailyRisk: Number(
+        value.riskProfile.maxDailyRisk ??
+          defaultVerticalSpreadRiskProfile.maxDailyRisk,
+      ),
+      maxDte: Number(
+        value.riskProfile.maxDte ?? defaultVerticalSpreadRiskProfile.maxDte,
+      ),
+      maxLoss: Number(
+        value.riskProfile.maxLoss ?? defaultVerticalSpreadRiskProfile.maxLoss,
+      ),
+      maxOpenTrades: Number(
+        value.riskProfile.maxOpenTrades ??
+          defaultVerticalSpreadRiskProfile.maxOpenTrades,
+      ),
+      maxTradesPerDay: Number(
+        value.riskProfile.maxTradesPerDay ??
+          defaultVerticalSpreadRiskProfile.maxTradesPerDay,
+      ),
+      maxTradesPerSymbol: Number(
+        value.riskProfile.maxTradesPerSymbol ??
+          defaultVerticalSpreadRiskProfile.maxTradesPerSymbol,
+      ),
+      minDte: Number(
+        value.riskProfile.minDte ?? defaultVerticalSpreadRiskProfile.minDte,
+      ),
+      minOpenInterest: Number(
+        value.riskProfile.minOpenInterest ??
+          defaultVerticalSpreadRiskProfile.minOpenInterest,
+      ),
     },
   };
 }
@@ -77,6 +108,18 @@ export async function POST(
       client,
       request: previewRequest,
       symbol,
+    });
+
+    recordAuditEvent({
+      details: {
+        candidateId: preview.candidate.id,
+        estimatedMaxLoss: preview.estimatedMaxLoss,
+        estimatedMaxProfit: preview.estimatedMaxProfit,
+        quantity: preview.quantity,
+        score: preview.candidate.score,
+        underlyingSymbol: symbol,
+      },
+      eventType: "paper_order_previewed",
     });
 
     return NextResponse.json({

@@ -9,7 +9,9 @@ import { evaluateVerticalSpreadRisk } from "@/features/risk/vertical-spread-risk
 import type { VerticalSpreadRiskProfile } from "@/features/risk/types";
 import type {
   VerticalSpreadCandidate,
+  VerticalSpreadExplanation,
   VerticalSpreadLeg,
+  VerticalSpreadScoreGrade,
   VerticalSpreadStrategy,
 } from "@/features/spreads/types";
 
@@ -93,6 +95,130 @@ function roundCurrency(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
+function toOpenInterestNumber(value: string | null): number | null {
+  const parsed = Number(value);
+
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getMinOpenInterest(
+  lower: QuotedContract,
+  upper: QuotedContract,
+): number | null {
+  const lowerOpenInterest = toOpenInterestNumber(lower.openInterest);
+  const upperOpenInterest = toOpenInterestNumber(upper.openInterest);
+
+  if (lowerOpenInterest === null || upperOpenInterest === null) {
+    return null;
+  }
+
+  return Math.min(lowerOpenInterest, upperOpenInterest);
+}
+
+function getRewardRiskRatio(maxProfit: number, maxLoss: number): number {
+  return Math.round((maxProfit / maxLoss) * 100) / 100;
+}
+
+function getScoreGrade(score: number): VerticalSpreadScoreGrade {
+  if (score >= 80) {
+    return "A";
+  }
+
+  if (score >= 65) {
+    return "B";
+  }
+
+  if (score >= 50) {
+    return "C";
+  }
+
+  return "D";
+}
+
+function buildScoring({
+  dte,
+  maxBidAskWidth,
+  maxLoss,
+  maxProfit,
+  minOpenInterest,
+  riskProfile,
+}: {
+  dte: number;
+  maxBidAskWidth: number;
+  maxLoss: number;
+  maxProfit: number;
+  minOpenInterest: number | null;
+  riskProfile: VerticalSpreadRiskProfile;
+}): VerticalSpreadExplanation {
+  const rewardRiskRatio = getRewardRiskRatio(maxProfit, maxLoss);
+  const liquidityScore = Math.max(
+    0,
+    Math.min(30, (1 - maxBidAskWidth / riskProfile.maxBidAskWidth) * 30),
+  );
+  const rewardRiskScore = Math.min(30, rewardRiskRatio * 7.5);
+  const openInterestScore =
+    minOpenInterest === null
+      ? 0
+      : Math.min(20, (minOpenInterest / riskProfile.minOpenInterest) * 20);
+  const dteMidpoint = (riskProfile.minDte + riskProfile.maxDte) / 2;
+  const dteSpan = Math.max(1, riskProfile.maxDte - riskProfile.minDte);
+  const dteScore = Math.max(
+    0,
+    Math.min(20, 20 - (Math.abs(dte - dteMidpoint) / dteSpan) * 20),
+  );
+  const scoreParts = {
+    dte: Math.round(dteScore),
+    liquidity: Math.round(liquidityScore),
+    openInterest: Math.round(openInterestScore),
+    rewardRisk: Math.round(rewardRiskScore),
+  };
+  const score = Math.min(
+    100,
+    scoreParts.dte +
+      scoreParts.liquidity +
+      scoreParts.openInterest +
+      scoreParts.rewardRisk,
+  );
+  const grade = getScoreGrade(score);
+  const points = [
+    `Reward/risk is ${rewardRiskRatio.toFixed(2)}:1.`,
+    `Widest leg bid/ask is ${roundCurrency(maxBidAskWidth).toFixed(2)}.`,
+    minOpenInterest === null
+      ? "Open interest is not available on one or more legs."
+      : `Minimum leg open interest is ${minOpenInterest}.`,
+    `Expiration is ${dte} DTE.`,
+  ];
+
+  return {
+    grade,
+    points,
+    score,
+    scoreParts,
+  };
+}
+
+function calculateBreakeven(
+  strategy: VerticalSpreadStrategy,
+  longLeg: QuotedContract,
+  shortLeg: QuotedContract,
+  netDebit: number | null,
+  netCredit: number | null,
+): number {
+  if (strategy === "bull_call_debit") {
+    return roundCurrency(longLeg.strike + (netDebit ?? 0));
+  }
+
+  if (strategy === "bear_put_debit") {
+    return roundCurrency(longLeg.strike - (netDebit ?? 0));
+  }
+
+  if (strategy === "bear_call_credit") {
+    return roundCurrency(shortLeg.strike + (netCredit ?? 0));
+  }
+
+  return roundCurrency(shortLeg.strike - (netCredit ?? 0));
+}
+
 function buildCandidate(
   strategy: VerticalSpreadStrategy,
   lower: QuotedContract,
@@ -138,13 +264,23 @@ function buildCandidate(
   const maxBidAskWidth = roundCurrency(
     Math.max(lower.maxBidAskWidth, upper.maxBidAskWidth),
   );
+  const minOpenInterest = getMinOpenInterest(lower, upper);
   const riskChecks = evaluateVerticalSpreadRisk(
-    { dte, maxBidAskWidth, maxLoss },
+    { dte, maxBidAskWidth, maxLoss, minOpenInterest },
     riskProfile,
   );
+  const scoring = buildScoring({
+    dte,
+    maxBidAskWidth,
+    maxLoss,
+    maxProfit,
+    minOpenInterest,
+    riskProfile,
+  });
 
   return {
     ask: longLeg.ask,
+    breakeven: calculateBreakeven(strategy, longLeg, shortLeg, debit, credit),
     bid: shortLeg.bid,
     dte,
     expirationDate: lower.expirationDate,
@@ -158,9 +294,14 @@ function buildCandidate(
     maxBidAskWidth,
     maxLoss,
     maxProfit,
+    minOpenInterest,
     netCredit: credit,
     netDebit: debit,
+    rewardRiskRatio: getRewardRiskRatio(maxProfit, maxLoss),
     riskChecks,
+    score: scoring.score,
+    scoreGrade: scoring.grade,
+    scoring,
     strategy,
     type: lower.type,
     width,
@@ -187,6 +328,12 @@ function sortCandidate(
   left: VerticalSpreadCandidate,
   right: VerticalSpreadCandidate,
 ): number {
+  const scoreSort = right.score - left.score;
+
+  if (scoreSort !== 0) {
+    return scoreSort;
+  }
+
   const expirationSort = left.expirationDate.localeCompare(right.expirationDate);
 
   if (expirationSort !== 0) {

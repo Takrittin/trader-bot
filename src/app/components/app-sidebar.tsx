@@ -28,6 +28,12 @@ const navItems = [
     label: "Spread Candidates",
     matcher: (pathname: string) => pathname.startsWith("/spreads"),
   },
+  {
+    description: "Orders and audit trail",
+    href: "/journal",
+    label: "Journal",
+    matcher: (pathname: string) => pathname.startsWith("/journal"),
+  },
 ];
 
 export function AppSidebar() {

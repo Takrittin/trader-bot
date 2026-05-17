@@ -7,6 +7,10 @@ import type {
   AccountDashboardResponse,
 } from "@/features/account/types";
 import type { KillSwitchStatus } from "@/features/kill-switch/types";
+import type {
+  JournalErrorResponse,
+  JournalOrderListResponse,
+} from "@/features/journal/types";
 import { defaultVerticalSpreadRiskProfile } from "@/features/risk/types";
 import type {
   VerticalSpreadCandidate,
@@ -33,9 +37,13 @@ function buildCandidatesEndpoint(): string {
   const params = new URLSearchParams({
     limit: "6",
     maxBidAskWidth: String(defaultVerticalSpreadRiskProfile.maxBidAskWidth),
+    maxDailyRisk: String(defaultVerticalSpreadRiskProfile.maxDailyRisk),
     maxDte: String(defaultVerticalSpreadRiskProfile.maxDte),
     maxLoss: String(defaultVerticalSpreadRiskProfile.maxLoss),
+    maxOpenTrades: String(defaultVerticalSpreadRiskProfile.maxOpenTrades),
     maxTradesPerDay: String(defaultVerticalSpreadRiskProfile.maxTradesPerDay),
+    maxTradesPerSymbol: String(defaultVerticalSpreadRiskProfile.maxTradesPerSymbol),
+    minOpenInterest: String(defaultVerticalSpreadRiskProfile.minOpenInterest),
     minDte: String(defaultVerticalSpreadRiskProfile.minDte),
   });
 
@@ -123,6 +131,9 @@ export function DashboardOverview() {
   >({ status: "loading" });
   const [candidatesState, setCandidatesState] = useState<
     ResourceState<VerticalSpreadCandidatesResponse>
+  >({ status: "loading" });
+  const [journalState, setJournalState] = useState<
+    ResourceState<JournalOrderListResponse>
   >({ status: "loading" });
 
   useEffect(() => {
@@ -215,9 +226,39 @@ export function DashboardOverview() {
       }
     }
 
+    async function loadJournal() {
+      setJournalState({ status: "loading" });
+
+      try {
+        const response = await fetch("/api/journal/orders", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const data = await parseJsonResponse<
+          JournalOrderListResponse,
+          JournalErrorResponse
+        >(response, "Unable to load paper journal.");
+
+        setJournalState({ data, status: "success" });
+      } catch (error) {
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        setJournalState({
+          message:
+            error instanceof Error
+              ? error.message
+              : "Unable to load paper journal.",
+          status: "error",
+        });
+      }
+    }
+
     void loadAccount();
     void loadKillSwitch();
     void loadCandidates();
+    void loadJournal();
 
     return () => controller.abort();
   }, []);
@@ -244,6 +285,8 @@ export function DashboardOverview() {
     candidatesState.status === "success"
       ? candidatesState.data.candidates.slice(0, 4)
       : [];
+  const latestOrders =
+    journalState.status === "success" ? journalState.data.orders.slice(0, 4) : [];
 
   return (
     <main className="app-shell dashboard-page">
@@ -262,6 +305,9 @@ export function DashboardOverview() {
           </Link>
           <Link className="button" href={`/spreads/${watchSymbol}`}>
             Generate spreads
+          </Link>
+          <Link className="button secondary" href="/journal">
+            Open journal
           </Link>
         </div>
       </section>
@@ -343,6 +389,22 @@ export function DashboardOverview() {
             </small>
           </div>
         </article>
+        <article className="status-card">
+          <span className="status-dot info" />
+          <div>
+            <p className="panel-label">Open risk</p>
+            <strong>
+              {journalState.status === "success"
+                ? formatMoney(journalState.data.summary.openRisk)
+                : "Loading"}
+            </strong>
+            <small>
+              {journalState.status === "success"
+                ? `${journalState.data.summary.openTrades} open journaled orders`
+                : "Local journal"}
+            </small>
+          </div>
+        </article>
       </section>
 
       <section className="dashboard-grid">
@@ -414,6 +476,7 @@ export function DashboardOverview() {
               <div className="opportunity-table" role="table">
                 <div className="opportunity-row opportunity-head" role="row">
                   <span>Strategy</span>
+                  <span>Score</span>
                   <span>Expiry</span>
                   <span>Premium</span>
                   <span>Max loss</span>
@@ -430,6 +493,10 @@ export function DashboardOverview() {
                       <small>
                         {candidate.width} wide · {candidate.type}
                       </small>
+                    </span>
+                    <span>
+                      {candidate.scoreGrade} · {candidate.score}
+                      <small>{candidate.rewardRiskRatio.toFixed(2)}:1 R/R</small>
                     </span>
                     <span>
                       {formatDate(candidate.expirationDate)}
@@ -483,6 +550,23 @@ export function DashboardOverview() {
                   {riskProfile.currentTradesToday}/{riskProfile.maxTradesPerDay}
                 </strong>
               </div>
+              <div>
+                <span>Open trades</span>
+                <strong>
+                  {riskProfile.currentOpenTrades}/{riskProfile.maxOpenTrades}
+                </strong>
+              </div>
+              <div>
+                <span>Daily risk</span>
+                <strong>
+                  {formatMoney(riskProfile.currentDailyRisk)} /{" "}
+                  {formatMoney(riskProfile.maxDailyRisk)}
+                </strong>
+              </div>
+              <div>
+                <span>Minimum OI</span>
+                <strong>{formatWholeNumber(riskProfile.minOpenInterest)}</strong>
+              </div>
             </div>
           </section>
 
@@ -512,9 +596,57 @@ export function DashboardOverview() {
               </div>
               <div>
                 <span>Paper orders</span>
-                <strong>No recent submissions</strong>
+                <strong>
+                  {journalState.status === "success"
+                    ? formatDateTime(journalState.data.fetchedAt)
+                    : journalState.status}
+                </strong>
               </div>
             </div>
+          </section>
+
+          <section className="dashboard-panel">
+            <div className="panel-heading">
+              <div>
+                <p className="panel-label">Journal</p>
+                <h2>Recent orders</h2>
+              </div>
+              <Link className="text-link" href="/journal">
+                Review
+              </Link>
+            </div>
+            {journalState.status === "loading" ? (
+              <div className="loading-grid" aria-hidden="true">
+                <span />
+                <span />
+              </div>
+            ) : null}
+            {journalState.status === "error" ? (
+              <div className="empty-state" role="alert">
+                <strong>Journal unavailable</strong>
+                <p>{journalState.message}</p>
+              </div>
+            ) : null}
+            {journalState.status === "success" && latestOrders.length === 0 ? (
+              <div className="empty-state">
+                <strong>No paper orders journaled</strong>
+                <p>Preview and submit a paper order to start the audit trail.</p>
+              </div>
+            ) : null}
+            {journalState.status === "success" && latestOrders.length > 0 ? (
+              <div className="activity-list">
+                {latestOrders.map((order) => (
+                  <div key={order.id}>
+                    <span>{strategyLabels[order.strategy]}</span>
+                    <strong>{order.status}</strong>
+                    <small>
+                      {order.underlyingSymbol} · {formatMoney(order.estimatedMaxLoss)}{" "}
+                      risk · score {order.score}
+                    </small>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </section>
         </aside>
       </section>
