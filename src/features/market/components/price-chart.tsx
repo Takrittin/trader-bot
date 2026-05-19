@@ -1,7 +1,28 @@
 "use client";
 
-import { FormEvent, useCallback, useState } from "react";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useRouter } from "next/navigation";
+import {
+  CandlestickSeries,
+  ColorType,
+  createChart,
+  createSeriesMarkers,
+  HistogramSeries,
+  LineSeries,
+  LineStyle,
+  type CandlestickData,
+  type HistogramData,
+  type LineData,
+  type SeriesMarker,
+  type UTCTimestamp,
+} from "lightweight-charts";
 import {
   DEFAULT_STOCK_BAR_FEED,
   DEFAULT_STOCK_BAR_TIMEFRAME,
@@ -13,6 +34,10 @@ import {
   type StockBarSummary,
   type StockBarTimeframe,
 } from "@/features/market/types";
+import {
+  calculateTrendStrategy,
+  type TrendStrategySignal,
+} from "@/features/market/strategy";
 import { normalizeUnderlyingSymbol } from "@/features/options/symbol";
 
 type PriceChartProps = {
@@ -26,27 +51,16 @@ type PriceChartState =
   | { message: string; status: "error" }
   | { data: StockBarsResponse; status: "success" };
 
-type ChartBounds = {
-  bottom: number;
-  left: number;
-  right: number;
-  top: number;
+type LightweightChartModel = {
+  candles: CandlestickData<UTCTimestamp>[];
+  ema20: LineData<UTCTimestamp>[];
+  ema50: LineData<UTCTimestamp>[];
+  markers: SeriesMarker<UTCTimestamp>[];
+  signal: TrendStrategySignal;
+  trendline: LineData<UTCTimestamp>[];
+  volume: HistogramData<UTCTimestamp>[];
 };
 
-const svgWidth = 920;
-const svgHeight = 400;
-const priceBounds: ChartBounds = {
-  bottom: 268,
-  left: 58,
-  right: 835,
-  top: 22,
-};
-const volumeBounds: ChartBounds = {
-  bottom: 360,
-  left: priceBounds.left,
-  right: priceBounds.right,
-  top: 300,
-};
 const missingValue = "Not available";
 
 const currencyFormatter = new Intl.NumberFormat("en-US", {
@@ -58,6 +72,10 @@ const currencyFormatter = new Intl.NumberFormat("en-US", {
 const compactNumberFormatter = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 1,
   notation: "compact",
+});
+const numberFormatter = new Intl.NumberFormat("en-US", {
+  maximumFractionDigits: 2,
+  minimumFractionDigits: 2,
 });
 const percentFormatter = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 2,
@@ -76,6 +94,12 @@ const timeframeLabels: Record<StockBarTimeframe, string> = {
 const feedLabels: Record<StockBarFeed, string> = {
   iex: "IEX",
   sip: "SIP",
+};
+
+const statusLabels: Record<TrendStrategySignal["status"], string> = {
+  not_ready: "Not ready",
+  ready: "Ready zone",
+  watch: "Watch pullback",
 };
 
 function buildBarsEndpoint(
@@ -123,6 +147,14 @@ function formatCurrency(value: number | null): string {
   return currencyFormatter.format(value);
 }
 
+function formatNumber(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) {
+    return missingValue;
+  }
+
+  return numberFormatter.format(value);
+}
+
 function formatDateTime(value: string): string {
   const date = new Date(value);
 
@@ -134,78 +166,6 @@ function formatDateTime(value: string): string {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
-}
-
-function formatAxisDateTime(value: string, timeframe: StockBarTimeframe): string {
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  if (timeframe === "1Day") {
-    return new Intl.DateTimeFormat("en-US", {
-      day: "numeric",
-      month: "short",
-    }).format(date);
-  }
-
-  return new Intl.DateTimeFormat("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    month: "short",
-  }).format(date);
-}
-
-function scaleLinear(
-  value: number,
-  domainMin: number,
-  domainMax: number,
-  rangeMin: number,
-  rangeMax: number,
-) {
-  if (domainMax === domainMin) {
-    return (rangeMin + rangeMax) / 2;
-  }
-
-  const ratio = (value - domainMin) / (domainMax - domainMin);
-
-  return rangeMax - ratio * (rangeMax - rangeMin);
-}
-
-function getPriceDomain(bars: StockBarSummary[]) {
-  let low = Number.POSITIVE_INFINITY;
-  let high = Number.NEGATIVE_INFINITY;
-
-  for (const bar of bars) {
-    low = Math.min(low, bar.low);
-    high = Math.max(high, bar.high);
-  }
-
-  if (!Number.isFinite(low) || !Number.isFinite(high)) {
-    return {
-      max: 1,
-      min: 0,
-    };
-  }
-
-  const padding = Math.max((high - low) * 0.08, high * 0.002, 0.01);
-
-  return {
-    max: high + padding,
-    min: Math.max(0, low - padding),
-  };
-}
-
-function getUniqueIndexes(length: number) {
-  return Array.from(
-    new Set([
-      0,
-      Math.floor((length - 1) * 0.33),
-      Math.floor((length - 1) * 0.66),
-      length - 1,
-    ]),
-  ).filter((index) => index >= 0 && index < length);
 }
 
 function getChangeSummary(bars: StockBarSummary[]) {
@@ -227,6 +187,364 @@ function getChangeSummary(bars: StockBarSummary[]) {
   };
 }
 
+function toChartTime(timestamp: string): UTCTimestamp {
+  return Math.floor(new Date(timestamp).getTime() / 1000) as UTCTimestamp;
+}
+
+function buildEmaSeries(
+  bars: StockBarSummary[],
+  period: number,
+): LineData<UTCTimestamp>[] {
+  if (bars.length < period) {
+    return [];
+  }
+
+  const multiplier = 2 / (period + 1);
+  const series: LineData<UTCTimestamp>[] = [];
+  let ema =
+    bars
+      .slice(0, period)
+      .reduce((sum, bar) => sum + bar.close, 0) / period;
+
+  series.push({
+    time: toChartTime(bars[period - 1].timestamp),
+    value: ema,
+  });
+
+  for (const bar of bars.slice(period)) {
+    ema = bar.close * multiplier + ema * (1 - multiplier);
+    series.push({
+      time: toChartTime(bar.timestamp),
+      value: ema,
+    });
+  }
+
+  return series;
+}
+
+function buildLightweightChartModel(
+  data: StockBarsResponse,
+): LightweightChartModel {
+  const signal = calculateTrendStrategy(data.bars);
+  const candles = data.bars.map<CandlestickData<UTCTimestamp>>((bar) => ({
+    close: bar.close,
+    high: bar.high,
+    low: bar.low,
+    open: bar.open,
+    time: toChartTime(bar.timestamp),
+  }));
+  const volume = data.bars.map<HistogramData<UTCTimestamp>>((bar) => ({
+    color:
+      bar.close >= bar.open ? "rgba(21, 122, 90, 0.34)" : "rgba(164, 49, 36, 0.30)",
+    time: toChartTime(bar.timestamp),
+    value: bar.volume,
+  }));
+  const lastBar = data.bars.at(-1);
+  const trendline =
+    signal.trendline.first && signal.trendline.currentPrice && lastBar
+      ? [
+          {
+            time: toChartTime(signal.trendline.first.timestamp),
+            value: signal.trendline.first.price,
+          },
+          {
+            time: toChartTime(lastBar.timestamp),
+            value: signal.trendline.currentPrice,
+          },
+        ]
+      : [];
+  const markers: SeriesMarker<UTCTimestamp>[] = [];
+
+  if (signal.trendline.first) {
+    markers.push({
+      color: "#2f6690",
+      position: "belowBar",
+      shape: "circle",
+      text: "Pivot 1",
+      time: toChartTime(signal.trendline.first.timestamp),
+    });
+  }
+
+  if (signal.trendline.second) {
+    markers.push({
+      color: "#157a5a",
+      position: "belowBar",
+      shape: "circle",
+      text: "Pivot 2",
+      time: toChartTime(signal.trendline.second.timestamp),
+    });
+  }
+
+  if (lastBar && signal.entry) {
+    markers.push({
+      color: signal.status === "ready" ? "#157a5a" : "#9a5b00",
+      position: "belowBar",
+      shape: "arrowUp",
+      text: signal.status === "ready" ? "Buy zone" : "Watch",
+      time: toChartTime(lastBar.timestamp),
+    });
+  }
+
+  return {
+    candles,
+    ema20: buildEmaSeries(data.bars, 20),
+    ema50: buildEmaSeries(data.bars, 50),
+    markers,
+    signal,
+    trendline,
+    volume,
+  };
+}
+
+function PriceChartCanvas({ model }: { model: LightweightChartModel }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const container = containerRef.current;
+
+    if (!container || model.candles.length === 0) {
+      return;
+    }
+
+    const chart = createChart(container, {
+      autoSize: true,
+      crosshair: {
+        mode: 0,
+      },
+      grid: {
+        horzLines: {
+          color: "#dde3dc",
+        },
+        vertLines: {
+          color: "#edf1eb",
+        },
+      },
+      layout: {
+        background: {
+          color: "#f9faf7",
+          type: ColorType.Solid,
+        },
+        fontFamily:
+          "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+        textColor: "#667069",
+      },
+      rightPriceScale: {
+        borderColor: "#c7d0c8",
+        scaleMargins: {
+          bottom: 0.24,
+          top: 0.08,
+        },
+      },
+      timeScale: {
+        borderColor: "#c7d0c8",
+        rightOffset: 8,
+      },
+    });
+
+    const candleSeries = chart.addSeries(CandlestickSeries, {
+      borderDownColor: "#a43124",
+      borderUpColor: "#157a5a",
+      downColor: "#a43124",
+      priceLineVisible: true,
+      upColor: "#157a5a",
+      wickDownColor: "#a43124",
+      wickUpColor: "#157a5a",
+    });
+    const volumeSeries = chart.addSeries(HistogramSeries, {
+      priceFormat: {
+        type: "volume",
+      },
+      priceLineVisible: false,
+      priceScaleId: "",
+    });
+    const ema20Series = chart.addSeries(LineSeries, {
+      color: "#2f6690",
+      lineWidth: 2,
+      priceLineVisible: false,
+      title: "EMA 20",
+    });
+    const ema50Series = chart.addSeries(LineSeries, {
+      color: "#9a5b00",
+      lineWidth: 2,
+      priceLineVisible: false,
+      title: "EMA 50",
+    });
+    const trendlineSeries = chart.addSeries(LineSeries, {
+      color: "#111713",
+      lineStyle: LineStyle.Dashed,
+      lineWidth: 2,
+      priceLineVisible: false,
+      title: "Support",
+    });
+
+    candleSeries.setData(model.candles);
+    volumeSeries.setData(model.volume);
+    ema20Series.setData(model.ema20);
+    ema50Series.setData(model.ema50);
+    trendlineSeries.setData(model.trendline);
+    volumeSeries.priceScale().applyOptions({
+      scaleMargins: {
+        bottom: 0,
+        top: 0.78,
+      },
+    });
+    createSeriesMarkers(candleSeries, model.markers);
+
+    if (model.signal.buyZoneLow) {
+      candleSeries.createPriceLine({
+        axisLabelVisible: true,
+        color: "#2f6690",
+        lineStyle: LineStyle.Dotted,
+        lineWidth: 1,
+        price: model.signal.buyZoneLow,
+        title: "Zone low",
+      });
+    }
+
+    if (model.signal.buyZoneHigh) {
+      candleSeries.createPriceLine({
+        axisLabelVisible: true,
+        color: "#2f6690",
+        lineStyle: LineStyle.Dotted,
+        lineWidth: 1,
+        price: model.signal.buyZoneHigh,
+        title: "Zone high",
+      });
+    }
+
+    if (model.signal.entry) {
+      candleSeries.createPriceLine({
+        axisLabelVisible: true,
+        color: "#157a5a",
+        lineStyle: LineStyle.Solid,
+        lineWidth: 2,
+        price: model.signal.entry,
+        title: "Entry",
+      });
+    }
+
+    if (model.signal.stop) {
+      candleSeries.createPriceLine({
+        axisLabelVisible: true,
+        color: "#a43124",
+        lineStyle: LineStyle.Dashed,
+        lineWidth: 2,
+        price: model.signal.stop,
+        title: "Stop",
+      });
+    }
+
+    if (model.signal.target) {
+      candleSeries.createPriceLine({
+        axisLabelVisible: true,
+        color: "#0f6047",
+        lineStyle: LineStyle.Dashed,
+        lineWidth: 2,
+        price: model.signal.target,
+        title: "Target",
+      });
+    }
+
+    chart.timeScale().fitContent();
+
+    return () => {
+      chart.remove();
+    };
+  }, [model]);
+
+  return (
+    <div
+      className="tradingview-chart-host"
+      ref={containerRef}
+      role="img"
+      aria-label="TradingView Lightweight Charts candlestick strategy chart"
+    />
+  );
+}
+
+function StrategyPanel({ signal }: { signal: TrendStrategySignal }) {
+  const passedCount = signal.confirmations.filter(
+    (confirmation) => confirmation.passed,
+  ).length;
+
+  return (
+    <aside className="strategy-panel" aria-label="Strategy signal">
+      <div className={`strategy-status ${signal.status}`}>
+        <p className="panel-label">Strategy</p>
+        <strong>{statusLabels[signal.status]}</strong>
+        <small>
+          {passedCount} / {signal.confirmations.length} checks passed
+        </small>
+      </div>
+
+      <div className="strategy-metrics">
+        <div>
+          <span>Buy zone</span>
+          <strong>
+            {signal.buyZoneLow && signal.buyZoneHigh
+              ? `${formatCurrency(signal.buyZoneLow)} - ${formatCurrency(
+                  signal.buyZoneHigh,
+                )}`
+              : missingValue}
+          </strong>
+        </div>
+        <div>
+          <span>Entry</span>
+          <strong>{formatCurrency(signal.entry)}</strong>
+        </div>
+        <div>
+          <span>Stop</span>
+          <strong>{formatCurrency(signal.stop)}</strong>
+        </div>
+        <div>
+          <span>Target</span>
+          <strong>{formatCurrency(signal.target)}</strong>
+        </div>
+        <div>
+          <span>Risk/share</span>
+          <strong>{formatCurrency(signal.riskPerShare)}</strong>
+        </div>
+        <div>
+          <span>Reward/risk</span>
+          <strong>
+            {signal.rewardRiskRatio
+              ? `${formatNumber(signal.rewardRiskRatio)}:1`
+              : missingValue}
+          </strong>
+        </div>
+        <div>
+          <span>Trendline</span>
+          <strong>{formatCurrency(signal.trendline.currentPrice)}</strong>
+        </div>
+        <div>
+          <span>ATR 14</span>
+          <strong>{formatCurrency(signal.atr)}</strong>
+        </div>
+      </div>
+
+      <ul className="strategy-checks">
+        {signal.confirmations.map((confirmation) => (
+          <li
+            className={confirmation.passed ? "is-pass" : "is-fail"}
+            key={confirmation.description}
+          >
+            <span>{confirmation.passed ? "Pass" : "Fail"}</span>
+            <strong>{confirmation.description}</strong>
+          </li>
+        ))}
+      </ul>
+
+      <div className="strategy-formula">
+        <strong>Calculation</strong>
+        <small>
+          Entry = projected trendline + 0.25 ATR. Stop = recent low - 0.5 ATR.
+          Target = entry + 2R.
+        </small>
+      </div>
+    </aside>
+  );
+}
+
 function PriceChartContent({ data }: { data: StockBarsResponse }) {
   const bars = data.bars;
   const last = bars.at(-1) ?? null;
@@ -236,6 +554,7 @@ function PriceChartContent({ data }: { data: StockBarsResponse }) {
     change.change === null || change.change >= 0
       ? "positive-value"
       : "negative-value";
+  const chartModel = useMemo(() => buildLightweightChartModel(data), [data]);
 
   return (
     <>
@@ -269,15 +588,18 @@ function PriceChartContent({ data }: { data: StockBarsResponse }) {
         <section className="chart-panel">
           <div className="chart-panel-heading">
             <div>
-              <p className="panel-label">OHLCV</p>
+              <p className="panel-label">OHLCV strategy</p>
               <h2>
                 {data.symbol} {timeframeLabels[data.timeframe]}
               </h2>
             </div>
             <span>{formatDateTime(data.fetchedAt)}</span>
           </div>
-          <div className="chart-shell">
-            <PriceChartSvg bars={bars} timeframe={data.timeframe} />
+          <div className="strategy-chart-layout">
+            <div className="chart-shell">
+              <PriceChartCanvas model={chartModel} />
+            </div>
+            <StrategyPanel signal={chartModel.signal} />
           </div>
         </section>
       ) : (
@@ -291,164 +613,6 @@ function PriceChartContent({ data }: { data: StockBarsResponse }) {
         </section>
       )}
     </>
-  );
-}
-
-function PriceChartSvg({
-  bars,
-  timeframe,
-}: {
-  bars: StockBarSummary[];
-  timeframe: StockBarTimeframe;
-}) {
-  const visibleBars = bars.slice(-180);
-  const priceDomain = getPriceDomain(visibleBars);
-  const maxVolume = Math.max(...visibleBars.map((bar) => bar.volume), 1);
-  const slotWidth =
-    (priceBounds.right - priceBounds.left) / Math.max(visibleBars.length, 1);
-  const candleWidth = Math.max(2, Math.min(10, slotWidth * 0.58));
-  const priceTicks = Array.from({ length: 5 }, (_, index) => {
-    const ratio = index / 4;
-
-    return priceDomain.max - (priceDomain.max - priceDomain.min) * ratio;
-  });
-  const timeTickIndexes = getUniqueIndexes(visibleBars.length);
-
-  return (
-    <svg
-      aria-label="Candlestick price chart with volume bars"
-      className="candlestick-svg"
-      role="img"
-      viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-    >
-      <rect className="chart-canvas" height={svgHeight} width={svgWidth} />
-
-      {priceTicks.map((tick) => {
-        const y = scaleLinear(
-          tick,
-          priceDomain.min,
-          priceDomain.max,
-          priceBounds.top,
-          priceBounds.bottom,
-        );
-
-        return (
-          <g key={tick}>
-            <line
-              className="chart-grid-line"
-              x1={priceBounds.left}
-              x2={priceBounds.right}
-              y1={y}
-              y2={y}
-            />
-            <text className="chart-axis-label" x={904} y={y + 4}>
-              {formatCurrency(tick)}
-            </text>
-          </g>
-        );
-      })}
-
-      <line
-        className="chart-axis-line"
-        x1={priceBounds.left}
-        x2={priceBounds.left}
-        y1={priceBounds.top}
-        y2={volumeBounds.bottom}
-      />
-      <line
-        className="chart-axis-line"
-        x1={priceBounds.left}
-        x2={priceBounds.right}
-        y1={priceBounds.bottom}
-        y2={priceBounds.bottom}
-      />
-
-      {visibleBars.map((bar, index) => {
-        const x = priceBounds.left + slotWidth * index + slotWidth / 2;
-        const openY = scaleLinear(
-          bar.open,
-          priceDomain.min,
-          priceDomain.max,
-          priceBounds.top,
-          priceBounds.bottom,
-        );
-        const closeY = scaleLinear(
-          bar.close,
-          priceDomain.min,
-          priceDomain.max,
-          priceBounds.top,
-          priceBounds.bottom,
-        );
-        const highY = scaleLinear(
-          bar.high,
-          priceDomain.min,
-          priceDomain.max,
-          priceBounds.top,
-          priceBounds.bottom,
-        );
-        const lowY = scaleLinear(
-          bar.low,
-          priceDomain.min,
-          priceDomain.max,
-          priceBounds.top,
-          priceBounds.bottom,
-        );
-        const isUp = bar.close >= bar.open;
-        const className = isUp ? "is-up" : "is-down";
-        const bodyY = Math.min(openY, closeY);
-        const bodyHeight = Math.max(Math.abs(closeY - openY), 1.5);
-        const volumeHeight =
-          (bar.volume / maxVolume) * (volumeBounds.bottom - volumeBounds.top);
-
-        return (
-          <g className={className} key={`${bar.timestamp}-${index}`}>
-            <line
-              className="candle-wick"
-              x1={x}
-              x2={x}
-              y1={highY}
-              y2={lowY}
-            />
-            <rect
-              className="candle-body"
-              height={bodyHeight}
-              rx={1}
-              width={candleWidth}
-              x={x - candleWidth / 2}
-              y={bodyY}
-            />
-            <rect
-              className="volume-bar"
-              height={Math.max(volumeHeight, 1)}
-              width={Math.max(candleWidth, 2)}
-              x={x - Math.max(candleWidth, 2) / 2}
-              y={volumeBounds.bottom - Math.max(volumeHeight, 1)}
-            />
-          </g>
-        );
-      })}
-
-      {timeTickIndexes.map((index) => {
-        const bar = visibleBars[index];
-        const x = priceBounds.left + slotWidth * index + slotWidth / 2;
-
-        return (
-          <text
-            className="chart-time-label"
-            key={bar.timestamp}
-            textAnchor={index === 0 ? "start" : "middle"}
-            x={x}
-            y={388}
-          >
-            {formatAxisDateTime(bar.timestamp, timeframe)}
-          </text>
-        );
-      })}
-
-      <text className="chart-volume-label" x={priceBounds.left} y={292}>
-        Volume
-      </text>
-    </svg>
   );
 }
 

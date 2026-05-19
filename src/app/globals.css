@@ -1100,80 +1100,127 @@ h3 {
 
 .chart-shell {
   min-width: 0;
-  overflow-x: auto;
+  overflow: hidden;
   background: var(--panel-soft);
   border: 1px solid var(--border);
   border-radius: 8px;
 }
 
-.candlestick-svg {
-  display: block;
+.strategy-chart-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 14px;
+  align-items: stretch;
+}
+
+.tradingview-chart-host {
   width: 100%;
-  min-width: 760px;
-  height: auto;
+  height: clamp(420px, 56vw, 620px);
 }
 
-.chart-canvas {
-  fill: var(--panel-soft);
+.strategy-panel {
+  display: grid;
+  gap: 12px;
+  align-content: start;
 }
 
-.chart-grid-line {
-  stroke: #dce4dd;
-  stroke-width: 1;
+.strategy-status,
+.strategy-metrics div,
+.strategy-checks li,
+.strategy-formula {
+  min-width: 0;
+  padding: 13px;
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
 }
 
-.chart-axis-line {
-  stroke: var(--border-strong);
-  stroke-width: 1.2;
+.strategy-status.ready {
+  background: var(--accent-soft);
+  border-color: #b7dfcf;
 }
 
-.chart-axis-label,
-.chart-time-label,
-.chart-volume-label {
-  fill: var(--muted);
-  font-size: 12px;
+.strategy-status.watch {
+  background: var(--warning-soft);
+  border-color: #edcf9c;
+}
+
+.strategy-status.not_ready {
+  background: var(--danger-soft);
+  border-color: #efb8b0;
+}
+
+.strategy-status strong,
+.strategy-status small,
+.strategy-formula strong,
+.strategy-formula small {
+  display: block;
+}
+
+.strategy-status strong {
+  font-size: 1.28rem;
+  line-height: 1.1;
+}
+
+.strategy-status small,
+.strategy-formula small {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.76rem;
   font-weight: 750;
+  line-height: 1.35;
 }
 
-.chart-axis-label {
-  text-anchor: end;
+.strategy-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
 
-.chart-volume-label {
+.strategy-metrics span,
+.strategy-checks span {
+  display: block;
+  margin: 0 0 7px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 850;
   text-transform: uppercase;
 }
 
-.candle-wick {
-  stroke-width: 1.3;
+.strategy-metrics strong,
+.strategy-checks strong {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 0.95rem;
+  line-height: 1.25;
 }
 
-.candle-body,
-.volume-bar {
-  stroke-width: 0;
+.strategy-checks {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
 }
 
-.is-up .candle-wick {
-  stroke: var(--accent);
+.strategy-checks li {
+  border-left: 4px solid var(--border-strong);
 }
 
-.is-up .candle-body {
-  fill: var(--accent);
+.strategy-checks li.is-pass {
+  border-left-color: var(--accent);
 }
 
-.is-up .volume-bar {
-  fill: rgb(21 122 90 / 34%);
+.strategy-checks li.is-fail {
+  border-left-color: var(--danger);
 }
 
-.is-down .candle-wick {
-  stroke: var(--danger);
+.strategy-checks li.is-pass span {
+  color: var(--accent-strong);
 }
 
-.is-down .candle-body {
-  fill: var(--danger);
-}
-
-.is-down .volume-bar {
-  fill: rgb(164 49 36 / 30%);
+.strategy-checks li.is-fail span {
+  color: var(--danger);
 }
 
 .option-type {
@@ -1259,6 +1306,10 @@ h3 {
   .dashboard-main,
   .dashboard-rail {
     grid-column: 1 / -1;
+  }
+
+  .strategy-chart-layout {
+    grid-template-columns: 1fr;
   }
 
   .risk-form {
@@ -1362,5 +1413,13 @@ h3 {
   .chart-panel-heading {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .tradingview-chart-host {
+    height: 440px;
+  }
+
+  .strategy-metrics {
+    grid-template-columns: 1fr;
   }
 }
