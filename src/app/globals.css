@@ -49,7 +49,8 @@ a {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -425,6 +426,7 @@ h3 {
 .dashboard-rail,
 .account-dashboard,
 .option-chain,
+.price-chart,
 .spread-generator,
 .paper-order-panel {
   display: grid;
@@ -703,7 +705,23 @@ h3 {
   box-shadow: var(--shadow);
 }
 
+.chart-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(520px, 680px);
+  gap: 20px;
+  align-items: end;
+  padding: 20px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
 .chain-toolbar h2 {
+  margin-bottom: 0;
+}
+
+.chart-toolbar h2 {
   margin-bottom: 0;
 }
 
@@ -712,7 +730,15 @@ h3 {
   gap: 8px;
 }
 
+.chart-controls {
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) minmax(116px, 0.65fr) minmax(96px, 0.55fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
 .symbol-form label,
+.chart-controls label,
 .risk-form label,
 .paper-order-confirmation {
   color: var(--muted);
@@ -727,6 +753,8 @@ h3 {
 }
 
 .symbol-form input,
+.chart-controls input,
+.chart-controls select,
 .risk-form input,
 .paper-order-confirmation input {
   min-width: 0;
@@ -740,8 +768,29 @@ h3 {
   font-weight: 760;
 }
 
-.symbol-form input {
+.symbol-form input,
+.chart-controls input {
   text-transform: uppercase;
+}
+
+.chart-controls label {
+  display: grid;
+  gap: 8px;
+}
+
+.chart-controls select {
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) 18px,
+    calc(100% - 12px) 18px;
+  background-repeat: no-repeat;
+  background-size:
+    6px 6px,
+    6px 6px;
+  cursor: pointer;
+  padding-right: 34px;
 }
 
 .spread-toolbar {
@@ -998,6 +1047,135 @@ h3 {
   gap: 14px;
 }
 
+.chart-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.metric-card small {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.positive-value {
+  color: var(--accent-strong);
+}
+
+.negative-value {
+  color: var(--danger);
+}
+
+.chart-panel {
+  min-width: 0;
+  padding: 18px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.chart-panel-heading {
+  display: flex;
+  gap: 16px;
+  align-items: start;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.chart-panel-heading h2 {
+  margin-bottom: 0;
+}
+
+.chart-panel-heading span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.chart-shell {
+  min-width: 0;
+  overflow-x: auto;
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.candlestick-svg {
+  display: block;
+  width: 100%;
+  min-width: 760px;
+  height: auto;
+}
+
+.chart-canvas {
+  fill: var(--panel-soft);
+}
+
+.chart-grid-line {
+  stroke: #dce4dd;
+  stroke-width: 1;
+}
+
+.chart-axis-line {
+  stroke: var(--border-strong);
+  stroke-width: 1.2;
+}
+
+.chart-axis-label,
+.chart-time-label,
+.chart-volume-label {
+  fill: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.chart-axis-label {
+  text-anchor: end;
+}
+
+.chart-volume-label {
+  text-transform: uppercase;
+}
+
+.candle-wick {
+  stroke-width: 1.3;
+}
+
+.candle-body,
+.volume-bar {
+  stroke-width: 0;
+}
+
+.is-up .candle-wick {
+  stroke: var(--accent);
+}
+
+.is-up .candle-body {
+  fill: var(--accent);
+}
+
+.is-up .volume-bar {
+  fill: rgb(21 122 90 / 34%);
+}
+
+.is-down .candle-wick {
+  stroke: var(--danger);
+}
+
+.is-down .candle-body {
+  fill: var(--danger);
+}
+
+.is-down .volume-bar {
+  fill: rgb(164 49 36 / 30%);
+}
+
 .option-type {
   display: inline-flex;
   align-items: center;
@@ -1133,6 +1311,7 @@ h3 {
   .page-header,
   .account-summary,
   .chain-toolbar,
+  .chart-toolbar,
   .spread-toolbar,
   .grid-section {
     grid-template-columns: 1fr;
@@ -1150,6 +1329,7 @@ h3 {
   .status-grid,
   .metric-grid,
   .chain-stats,
+  .chart-stats,
   .detail-grid,
   .loading-grid,
   .candidate-grid,
@@ -1173,5 +1353,14 @@ h3 {
 
   .symbol-form div {
     grid-template-columns: 1fr;
+  }
+
+  .chart-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .chart-panel-heading {
+    align-items: stretch;
+    flex-direction: column;
   }
 }

@@ -23,6 +23,12 @@ const navItems = [
     matcher: (pathname: string) => pathname.startsWith("/options"),
   },
   {
+    description: "Candles and volume",
+    href: "/charts/SPY",
+    label: "Charts",
+    matcher: (pathname: string) => pathname.startsWith("/charts"),
+  },
+  {
     description: "Risk-checked ideas",
     href: "/spreads/SPY",
     label: "Spread Candidates",

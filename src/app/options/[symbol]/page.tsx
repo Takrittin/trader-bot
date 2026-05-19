@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { OptionChain } from "@/features/options/components/option-chain";
 import { normalizeUnderlyingSymbol } from "@/features/options/symbol";
@@ -42,6 +43,14 @@ export default async function OptionChainPage({
             Contracts and market snapshots are fetched through server API routes.
             Alpaca credentials stay server-side.
           </p>
+        </div>
+        <div className="page-actions">
+          <Link className="button secondary" href={`/charts/${symbol}`}>
+            Price chart
+          </Link>
+          <Link className="button secondary" href={`/spreads/${symbol}`}>
+            Spread candidates
+          </Link>
         </div>
       </section>
 

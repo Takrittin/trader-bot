@@ -45,6 +45,9 @@ export default async function SpreadCandidatesPage({
           </p>
         </div>
         <div className="page-actions">
+          <Link className="button secondary" href={`/charts/${symbol}`}>
+            Price chart
+          </Link>
           <Link className="button secondary" href={`/options/${symbol}`}>
             Option chain
           </Link>

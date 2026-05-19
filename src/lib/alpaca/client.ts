@@ -9,6 +9,7 @@ import type {
   AlpacaOptionSnapshotsResponse,
   AlpacaOrder,
   AlpacaPosition,
+  AlpacaStockBarsResponse,
 } from "@/lib/alpaca/types";
 import { getServerEnv, type ServerEnv } from "@/lib/env/server";
 
@@ -38,6 +39,16 @@ type GetOrdersParams = {
   nested?: boolean;
   status?: "open" | "closed" | "all";
   until?: string;
+};
+
+type StockBarsParams = {
+  adjustment?: "raw" | "split" | "dividend" | "all";
+  end: string;
+  feed?: "iex" | "sip";
+  limit?: number;
+  pageToken?: string;
+  start: string;
+  timeframe: string;
 };
 
 export class AlpacaClientError extends Error {
@@ -184,6 +195,38 @@ export class AlpacaPaperClient {
 
     return this.getData(
       `/v1beta1/options/snapshots/${encodedSymbol}${query}`,
+      options,
+    );
+  }
+
+  getStockBars(
+    symbol: string,
+    params: StockBarsParams,
+    options?: ReadonlyRequestOptions,
+  ): Promise<AlpacaStockBarsResponse> {
+    const searchParams = new URLSearchParams({
+      adjustment: params.adjustment ?? "raw",
+      end: params.end,
+      start: params.start,
+      timeframe: params.timeframe,
+    });
+
+    if (params.feed) {
+      searchParams.set("feed", params.feed);
+    }
+
+    if (params.limit) {
+      searchParams.set("limit", String(params.limit));
+    }
+
+    if (params.pageToken) {
+      searchParams.set("page_token", params.pageToken);
+    }
+
+    const encodedSymbol = encodeURIComponent(symbol);
+
+    return this.getData(
+      `/v2/stocks/${encodedSymbol}/bars?${searchParams}`,
       options,
     );
   }

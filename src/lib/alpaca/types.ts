@@ -91,6 +91,23 @@ export type AlpacaOptionSnapshotsResponse = {
   next_page_token?: string;
 };
 
+export type AlpacaStockBar = {
+  c: number;
+  h: number;
+  l: number;
+  n?: number;
+  o: number;
+  t: string;
+  v: number;
+  vw?: number;
+};
+
+export type AlpacaStockBarsResponse = {
+  bars: AlpacaStockBar[];
+  next_page_token?: string | null;
+  symbol?: string;
+};
+
 export type AlpacaOrderSide = "buy" | "sell";
 export type AlpacaPositionIntent =
   | "buy_to_open"
